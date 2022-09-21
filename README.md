@@ -21,8 +21,9 @@ family](https://en.wikipedia.org/wiki/DBM_(computing)) also has many members.
 
 String orientation makes `FTab` "weakly typed" in the prog.lang. sense.  This is
 typical in the key-value/blob store space.  `lptabz` above comes closes to an
-escape, but really only works on files with value types.  github.com/c-blake/nio
-or github.com/Vindaar/nimhdf5 cover other approaches for strongly typed data.
+escape, but really only works on files with value types.  Other approaches for
+strongly typed data are at https://github.com/c-blake/nio and
+https://github.com/Vindaar/nimhdf5 and probably elsewhere.
 
 BASICS
 ======
