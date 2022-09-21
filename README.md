@@ -27,8 +27,8 @@ or github.com/Vindaar/nimhdf5 cover other approaches for strongly typed data.
 BASICS
 ======
 
-So, to fill a gap needed by some Nim use cases, enter this 6th variant - `FTab`
-- an file table.  The goal here is the simplest possible reasonably safe and
+So, to fill a gap needed by some Nim use cases, enter this 6th variant - `FTab`,
+a file table.  The goal here is the simplest possible reasonably safe and
 efficient native Nim persistent KV store that supports delete & space limits
 with unsorted string keys & values of fixed (total) size.
 
