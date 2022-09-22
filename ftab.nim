@@ -78,8 +78,10 @@ func hashPtrLen(k: pointer, n: int): Hash =
 func hash(t: FTab, te: TabEnt): Hash =  # Cache this after len(key)?
   hashPtrLen(t.key(te), t.kLen(te))
 
-# TODO Some workloads frequently iterate over just keys w/much larger vals =>
-#      want an option to embed (well bounded?) key data in hash file.
+# TODO Some workloads frequently iterate over just keys w/kLen << 4096B => want
+# an option to embed (well bounded?) key data in hash file (|3rd file).  Also
+# due to such workloads, should instead make new checksumming record kLen, key,
+# kChk, vLen, val, vChk so keys can be verified independently.
 func find(t: FTab, q: string|TabEnt, h: Hash): int =
   let mask = t.slots - 1                # Basic linear-probe finder of the index
   var i = h and mask                    #..where `q` either is or should be.
@@ -178,6 +180,9 @@ iterator kVals*(t: FTab): (int, pointer, int, pointer) =  #Q: items?
   iterate: yield (nK.int, cast[pointer](t.datF.at off + 4),
                   nV.int, cast[pointer](t.datF.at off + 4 + nK.U8 + 4))
 
+# TODO get/put/del should all accept pointer,int not a string for the key, but
+# then have a `string` overload that calls into that (or maybe call the lower
+# level API *Raw to access from C/C++/etc.)
 func get*(t: FTab; key: string): (int, pointer) =
   ## Find the value buffer for a given `key` or (0, nil) if not present.
   let i = t.find(key, hash(key))
