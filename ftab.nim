@@ -13,9 +13,20 @@ when not declared(csize_t):                     # Works back to Nim-0.20.2
 
 import std/[hashes, os, options, math], memfiles as mf, system/ansi_c
 
-proc err(s: string) =   # Can we chronicalize w/o needing much Status-verse?
-  try: stderr.write(s, "\n")
-  except: discard
+template tryImport(module) =    # if `chronicles` is installed, use it unless
+  import module                 # `-d:chronicles_enabled=off` is also given.
+
+template errFallback {.used.} = # define fallback not requiring 10 pkgs to log.
+  proc err(s: string) = (try: stderr.write(s, "\n") except: discard)
+
+when compiles(tryImport pkg/chronicles):
+  import pkg/chronicles/../chronicles
+  when loggingEnabled:    # TODO Probably we only need either info|notice & err
+    proc err(s: string) = # ..Cannot just do nim-result if C callers want msgs.
+      try: stderr.write(s, "\n")
+      except: discard
+  else: errFallback()
+else: errFallback()
 
 func roundUp(toRound: int; multiple: int): int = # round up to nearest multiple
   if multiple <= 0: return toRound               # std/math should grow this,IMO
@@ -23,7 +34,7 @@ func roundUp(toRound: int; multiple: int): int = # round up to nearest multiple
   if remainder == 0: return toRound
   toRound + multiple - remainder
 
-type # The main types of this module
+type # The real beginning of this module with main types
   U8     = uint64                     # The 8-bit byte is a done deal..
   TabEnt = distinct uint64            # Hash-prefixed pointer from index->data
   TEs    = ptr UncheckedArray[TabEnt] # Hash table-structured array of those
