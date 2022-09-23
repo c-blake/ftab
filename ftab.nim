@@ -355,7 +355,7 @@ proc fTabOpen*(datNm: string, tabNm="", mode=fmRead, recz = -1,
       err "fTabOpen cannot close just opened \"" & datNm & "\""
     result.datF.mem = nil
 
-  template openTab(mode) =      # Cpen index file part, closing data on failure
+  template openTab(mode) =      # Open index file part, closing data on failure
     if tab0 < 0 and fTabIndex(datNm, tabNm, lim=lim) < 0:
       err "fTabOpen cannot rebuild index for \"" & datNm & "\""
       closeDat()
