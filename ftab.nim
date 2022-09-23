@@ -171,12 +171,13 @@ proc growDat(t: var FTab): int =        # Grow file,thread free list w/new space
     return -2
   t.threadFree off0
 
-proc alloc(t: var FTab): U8 =           # Unlink head of free list
+proc alloc(t: var FTab, grew: var bool): U8 = # Unlink head of free list
   result = not t.head[]
   if result == 0:                       # Out of space in free list `head`
     if t.growDat < 0:
       return 0
     result = not t.head[]
+    grew = true
   t.head[] = cast[ptr U8](t.datF.at(not t.head[]))[]
 
 func free(t: FTab, off: U8) =           # Link block @off to head of free list
@@ -228,7 +229,8 @@ proc putRaw*(t: var FTab; key, val: Region): int =
   if i >= 0:
     err "key \"" & $key & "\" present in \"" & t.datN & "\""
     return -3
-  let off = t.alloc
+  var grew = false      # Flag saying either data|index file grew
+  let off = t.alloc(grew)
   if off == 0:
     return -1
   var keyLen = key.len.int32
@@ -241,10 +243,11 @@ proc putRaw*(t: var FTab; key, val: Region): int =
     if t.growTab < 0:
       t.free off; return -1
     i = t.find(key, h)
+    grew = true
   i = -i - 1
   t.tab[i] = TabEnt(U8((h and hMaskH) shl (64 - hBits)) or off)
   t.occu[].inc
-  t.sern[].inc  # Updating the serial number should always be the last step
+  if grew: t.serN[].inc # Updating serial number should always be the last step
 
 proc put*(t: var FTab; key, val: string): int = t.putRaw(key.toRegion, val.toRegion)
   ## Add (`key`, `val`) pair to an open, writable `FTab`. We use "put" to avoid
@@ -272,7 +275,6 @@ func delRaw*(t: FTab; key: Region): int =
         if not ((i >= r and r > j) or (r > j and j > i) or (j > i and i >= r)):
           break
       t.tab[j] = t.tab[i]               # [j] will be marked EMPTY next loop
-  t.sern[].inc  # Updating the serial number should always be the last step
 
 func del*(t: FTab; key: string): int = t.delRaw(key.toRegion)
   ## Delete entry named by key.  Returns -1 if missing.
