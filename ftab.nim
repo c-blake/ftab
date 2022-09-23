@@ -266,11 +266,15 @@ proc close*(t: var FTab, pad=false): int = ## Release OS resources for open FTab
 func isOpen*(t: FTab): bool = ## Test if successfully opened & still open
   t.datF.mem != nil
 
-proc flush*(t: var FTab): int = ## Try to flush all data to stable storage
-  try   : t.datF.flush
+proc flush*(t: var FTab, index=false): int =
+  ## Flush data to stable storage or return < 0.  Index is optional & off by
+  ## default to avoid long pauses from big table writes.  Instead, rely on
+  ## service management & post-crash index rebuild ability for that reliability.
+  try   : t.datF.flush  # Should be as incremental as new record puts is.
   except: result -= 1
-  try   : t.tabF.flush
-  except: result -= 1
+  if index:
+    try   : t.tabF.flush
+    except: result -= 1
 
 proc fTabRepair*(datNm: string): int =
   ## Recover post-unclean .close by studying unused `kLen<0` space in data.  To
