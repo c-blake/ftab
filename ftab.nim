@@ -44,6 +44,19 @@ type # The real beginning of this module with main types
     datF, tabF: MemFile # Memory mapped files
     lim: int            # Limit to total space used (sum of 2 `*F.size` fields)
     serial: U8          # serial number at open
+  Region* = (pointer, int)  ## Simple memory region type
+
+# Region helpers
+
+const NilRegion* = (nil, 0)               ## The Undefined Region
+proc mem*(r: Region): pointer = r[0]      ## Get its [0].addr
+func len*(r: Region): int = r[1]          ## Get its length
+func isNil*(r: Region): bool = r[0].isNil ## Test for being defined
+func hash*(r: Region): Hash =             ## Hash its data
+  hash(toOpenArray[byte](cast[ptr UncheckedArray[byte]](r[0]), 0, r[1] - 1))
+proc mem(q: string): pointer = q[0].unsafeAddr # make string compatible w/Region
+proc toRegion(s: string): Region =
+  result[0] = s[0].unsafeAddr; result[1] = s.len
 
 # Accessors for .off and .hsh in the table
 
@@ -83,24 +96,21 @@ func tooFull(c, s: int): bool = (c * 16 > s * 13) or (s < c + 16) # Should grow
 
 # More helper code to search|grow the table or to iterate the data
 
-func hashPtrLen(k: pointer, n: int): Hash =
-  hash(toOpenArray[byte](cast[ptr UncheckedArray[byte]](k), 0, n - 1))
-
 func hash(t: FTab, te: TabEnt): Hash =  # Cache this after len(key)?
-  hashPtrLen(t.key(te), t.kLen(te))
+  hash (t.key(te), t.kLen(te).int)      # .int critical to match `Region`
 
 # TODO Some workloads frequently iterate over just keys w/kLen << 4096B => want
-# an option to embed (well bounded?) key data in hash file (|3rd file).  Also
-# due to such workloads, should instead make new checksumming record kLen, key,
-# kChk, vLen, val, vChk so keys can be verified independently.
-func find(t: FTab, q: string|TabEnt, h: Hash): int =
+# an option to embed (well bounded?) key data in hash file.  Also due to such
+# workloads, should make checksummed record: kLen, key, kChk, vLen, val, totChk.
+
+func find(t: FTab, q: string|Region|TabEnt, h: Hash): int =
   let mask = t.slots - 1                # Basic linear-probe finder of the index
   var i = h and mask                    #..where `q` either is or should be.
   while (let te = t.tab[i]; U8(te) != 0):
-    when q is string:
+    when q isnot TabEnt:
       if (h and hMaskH) == te.hsh and q.len == t.kLen(te) and
-         c_memcmp(t.key(te), q[0].unsafeAddr, q.len.csize_t) == 0:
-           return i
+        c_memcmp(t.key(te), q.mem, q.len.csize_t) == 0:
+          return i
     # else: growTab TabEnt branch always finds a novel key
     i = (i + 1) and mask
   -i - 1                                # Missing insert @ -(result)-1
@@ -169,7 +179,7 @@ proc alloc(t: var FTab): U8 =           # Unlink head of free list
     result = not t.head[]
   t.head[] = cast[ptr U8](t.datF.at(not t.head[]))[]
 
-func free(t: var FTab, off: U8) =       # Link block @off to head of free list
+func free(t: FTab, off: U8) =           # Link block @off to head of free list
   cast[ptr U8](t.datF.at off)[] = t.head[] # .head is already an xptr
   #NOTE: A process crash here can make the free list mis-linked. See `Repair`.
   t.head[] = not off            # (Can repair by mapping out all kLen<0 recs.)
@@ -191,34 +201,42 @@ iterator kVals*(t: FTab): (int, pointer, int, pointer) =  #Q: items?
   iterate: yield (nK.int, cast[pointer](t.datF.at off + 4),
                   nV.int, cast[pointer](t.datF.at off + 4 + nK.U8 + 4))
 
-# TODO get/put/del should all accept pointer,int not a string for the key, but
-# then have a `string` overload that calls into that (or maybe call the lower
-# level API *Raw to access from C/C++/etc.)
-func get*(t: FTab; key: string): (int, pointer) =
-  ## Find the value buffer for a given `key` or (0, nil) if not present.
-  let i = t.find(key, hash(key))
-  if i < 0: (0, nil) else: (t.vN(t.tab[i]), t.val(t.tab[i]))
+func getRaw*(t: FTab; key: Region): Region =
+  ## Get value buffer for given `key` of length `nK` or `(nil,0)` if missing.
+  let i = t.find(key, key.hash)
+  if i < 0: NilRegion else: (t.val(t.tab[i]), t.vN(t.tab[i]))
 
-proc put*(t: var FTab; key, val: string): int =
-  ## Add (`key`, `val`) pair to an open, writable `FTab`. We use "put" to avoid
-  ## confusion with Nim's `add` which adds duplicate keys (disallowed here).
-  let recz = U8(key.len+val.len+8)       # Data + two sizes
+func getPtr*(t: FTab; key: string): Region =
+  ## Like `getRaw`, but take a Nim string parameter.
+  let i = t.find(key, key.hash)
+  if i < 0: NilRegion else: (t.val(t.tab[i]), t.vN(t.tab[i]))
+
+func `$`*(reg: Region): string =
+  if not reg.isNil:
+    result.setLen reg[1]
+    copyMem result[0].addr, reg[0], reg[1]
+
+func get*(t: FTab; key: string): string = $t.getPtr(key)
+  ## Alloc-copying call making a string to hold the result; "" if missing.
+
+proc putRaw*(t: var FTab; key, val: Region): int =
+  let recz = U8(key.len + val.len + 8)  # Data + k,vLen fields
   if recz > t.recz:
     err $recz & " bytes > \"" & t.datN & "\".recz=" & $ t.recz; return -2
   let h = key.hash
   var i = t.find(key, h)
   if i >= 0:
-    err "key \"" & key & "\" present in \"" & t.datN & "\""
+    err "key \"" & $key & "\" present in \"" & t.datN & "\""
     return -3
   let off = t.alloc
   if off == 0:
     return -1
   var keyLen = key.len.int32
   var valLen = val.len.uint32
-  copyMem t.datF.at(off                     ), keyLen.addr      , 4
-  copyMem t.datF.at(off + 4                 ), key[0].unsafeAddr, key.len
-  copyMem t.datF.at(off + 4 + key.len.U8    ), valLen.addr      , 4
-  copyMem t.datF.at(off + 4 + key.len.U8 + 4), val[0].unsafeAddr, val.len
+  copyMem t.datF.at(off                     ), keyLen.addr, 4
+  copyMem t.datF.at(off + 4                 ), key.mem    , key.len
+  copyMem t.datF.at(off + 4 + key.len.U8    ), valLen.addr, 4
+  copyMem t.datF.at(off + 4 + key.len.U8 + 4), val.mem    , val.len
   if tooFull(int(t.occu[]) + 1, t.slots):
     if t.growTab < 0:
       t.free off; return -1
@@ -228,8 +246,11 @@ proc put*(t: var FTab; key, val: string): int =
   t.occu[].inc
   t.sern[].inc  # Updating the serial number should always be the last step
 
-func del*(t: var FTab; key: string): int =
-  ## Delete entry named by key.  Returns -1 if missing.
+proc put*(t: var FTab; key, val: string): int = t.putRaw(key.toRegion, val.toRegion)
+  ## Add (`key`, `val`) pair to an open, writable `FTab`. We use "put" to avoid
+  ## confusion with Nim's `add` which adds duplicate keys (disallowed here).
+
+func delRaw*(t: FTab; key: Region): int =
   let h = key.hash              # 1) look up in index
   var i = t.find(key, h)
   if i < 0: return -1           # MISSING
@@ -252,6 +273,9 @@ func del*(t: var FTab; key: string): int =
           break
       t.tab[j] = t.tab[i]               # [j] will be marked EMPTY next loop
   t.sern[].inc  # Updating the serial number should always be the last step
+
+func del*(t: FTab; key: string): int = t.delRaw(key.toRegion)
+  ## Delete entry named by key.  Returns -1 if missing.
 
 proc close*(t: var FTab, pad=false): int = ## Release OS resources for open FTab.
   try:
@@ -299,7 +323,7 @@ proc fTabIndex*(datNm, tabNm: string, tab0=24, lim=0): int =
     err "fTabIndex cannot open | size \"" & tabNm & "\""
     return -2
   for (n, k) in t.keys:
-    let h  = hashPtrLen(k, n)
+    let h  = hash((k, n))
     let te = TabEnt((h shl (64 - hBits) or (cast[Hash](k) - 4)))
     var i  = t.find(te, h)
     if i >= 0:          # Should not happen unless things are badly corrupted
@@ -458,8 +482,8 @@ when isMainModule: # Simple, self-contained driver CLI program for testing/etc.
     var t = fTabOpen(base&".Lo", base&".NL")
     if not t.isOpen: quit(1)
     for i in 3..paramCount():
-      let (nV, v) = t.get(paramStr(i))
-      if v != nil:
+      let (v, nV) = t.getPtr(paramStr(i))
+      if not v.isNil:
         discard stdout.writeBuffer(v, nV)
       else: quit "key not found: " & paramStr(i), 4
     if t.close < 0: discard
