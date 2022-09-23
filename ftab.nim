@@ -403,7 +403,7 @@ proc fTabOpen*(datNm: string, tabNm="", mode=fmRead, recz = -1,
       err "fTabOpen cannot close just opened \"" & datNm & "\""
 
 proc refresh*(t: var FTab): int =
-  ## Re-open a read-only FTab only if necessary; Fast when unneeded.
+  ## Re-open a read-only FTab only if needed; Fast if unneeded.
   if t.mode == fmRead and t.serN[] != t.serial:
     if t.close < 0:
       err "FTab.refresh cannot close \"" & t.datN & "\""
