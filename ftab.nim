@@ -17,14 +17,14 @@ template tryImport(module) =    # if `chronicles` is installed, use it unless
   import module                 # `-d:chronicles_enabled=off` is also given.
 
 template errFallback {.used.} = # define fallback not requiring 10 pkgs to log.
+  proc inf(s: string) = (try: stderr.write(s, "\n") except: discard)
   proc err(s: string) = (try: stderr.write(s, "\n") except: discard)
 
 when compiles(tryImport pkg/chronicles):
   import pkg/chronicles/../chronicles
-  when loggingEnabled:    # TODO Probably we only need either info|notice & err
-    proc err(s: string) = # ..Cannot just do nim-result if C callers want msgs.
-      try: stderr.write(s, "\n")
-      except: discard
+  when loggingEnabled:      # Cannot just do nim-result if C callers want msgs.
+    proc inf(s: string) = (info("ftab behavior", s))
+    proc err(s: string) = (error("ftab oserror", s))
   else: errFallback()
 else: errFallback()
 
@@ -111,7 +111,7 @@ proc growTab(t: var FTab): int =        # Grow table by making new & renaming
   let nOld = t.slots                    # Old number of slots
   let tmp  = t.tabN & ".tmp"            # New file path
   if t.lim > 0 and (2*t.slots + 1)*8 + t.datF.size > t.lim:
-    err "FTab.growTab " & t.tabN & " OVER " & $t.lim
+    inf "FTab.growTab " & t.tabN & " OVER " & $t.lim
     return -1                           # Enforce limit/quota
   try:
     t.tabF = mf.open(tmp, fmReadWrite, -1, 0, (2*t.slots + 1)*8, true)
@@ -150,9 +150,9 @@ proc growDat(t: var FTab): int =        # Grow file,thread free list w/new space
     let left = U8(t.lim - t.tabF.size - off0.int)
     if left >= t.recz:                  # Round to nearest for best fit can do
       off1 = off0 + U8(left div t.recz) * t.recz
-      err "FTab.growDat NEAR LIMIT " & $t.lim & " ON \"" & t.datN & "\" " & $left
+      inf "FTab.growDat NEAR LIMIT " & $t.lim & " ON \"" & t.datN & "\" " & $left
     else:                               # Enforce limit/quota
-      err "FTab.growDat OVER LIMIT " & $t.lim & " ON \"" & t.datN & "\""
+      inf "FTab.growDat OVER LIMIT " & $t.lim & " ON \"" & t.datN & "\""
       return -1
   try:
     t.datF.resize off1.int              # Grow & remap # TODO fallocate|fallback
