@@ -23,8 +23,8 @@ template errFallback {.used.} = # define fallback not requiring 10 pkgs to log.
 when compiles(tryImport pkg/chronicles):
   import pkg/chronicles/../chronicles
   when loggingEnabled:      # Cannot just do nim-result if C callers want msgs.
-    proc inf(s: string) = (info("ftab behavior", s))
-    proc err(s: string) = (error("ftab oserror", s))
+    proc inf(s: string) = info("ftab behavior", s)
+    proc err(s: string) = error("ftab oserror", s)
   else: errFallback()
 else: errFallback()
 
