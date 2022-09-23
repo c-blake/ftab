@@ -192,14 +192,14 @@ template iterate(doYield) {.dirty.} =   # Logic to iterate data, skipping free
       let nV {.used.} = cast[ptr uint32](t.datF.at off + 4 + nK.U8)[]
       doYield
 
-iterator keys*(t: FTab): (int, pointer) =
+iterator keys*(t: FTab): Region =
   ## Iterate over just the keys in an open FTab file.
-  iterate: yield (nK.int, cast[pointer](t.datF.at off + 4))
+  iterate: yield (t.datF.at(off + 4), nK.int)
 
-iterator kVals*(t: FTab): (int, pointer, int, pointer) =  #Q: items?
+iterator kVals*(t: FTab): (Region, Region) =    # Q: items?
   ## Iterate over just the vals in an open FTab file.
-  iterate: yield (nK.int, cast[pointer](t.datF.at off + 4),
-                  nV.int, cast[pointer](t.datF.at off + 4 + nK.U8 + 4))
+  iterate: yield ((t.datF.at(off + 4), nK.int),
+                  (t.datF.at(off + 4 + nK.U8 + 4), nV.int))
 
 func getRaw*(t: FTab; key: Region): Region =
   ## Get value buffer for given `key` of length `nK` or `(nil,0)` if missing.
@@ -490,7 +490,7 @@ when isMainModule: # Simple, self-contained driver CLI program for testing/etc.
   elif match("l"): # List; No need for table index
     var t = fTabOpen(base&".Lo", "", dat0 = -1)
     if not t.isOpen: quit(1)
-    for (nK, k) in t.keys:
+    for (k, nK) in t.keys:
       discard stdout.writeBuffer(k, nK); echo ""
     if t.close < 0: discard
   elif match("r"): # Repair
