@@ -28,7 +28,7 @@ $ft p foo k[3-9]*
 }
 
 for i in $*; do                         # 3) Check contents
-  cmp <($ft g foo k$i) <(echo $i$d240) >$n 2>&1 || echo mismatch at k$i
+  cmp <($ft g foo k$i) <(echo $i$d240) >$n 2>&1 || echo mismatch1 at k$i
 done
 
 # 4) delete some things across a few opens
@@ -43,7 +43,7 @@ remain=$(($#-deleted))
 
 for i in $*; do                         # Check contents
   case k$i in k[12]*) continue;; esac
-  cmp <($ft g foo k$i) <(echo $i$d240) >$n 2>&1 || echo mismatch at k$i
+  cmp <($ft g foo k$i) <(echo $i$d240) >$n 2>&1 || echo mismatch2 at k$i
 done
 
 $ft d foo k[3-9]*                       # 5) delete the rest
@@ -56,7 +56,7 @@ $ft d foo k[3-9]*                       # 5) delete the rest
 $ft p foo k*                            # 7) Re-populate
 
 for i in $*; do                         # 8) Check again
-  cmp <($ft g foo k$i) <(echo $i$d240) >$n 2>&1 || echo mismatch at k$i
+  cmp <($ft g foo k$i) <(echo $i$d240) >$n 2>&1 || echo mismatch3 at k$i
 done
 
 ls -l foo.*
@@ -64,13 +64,13 @@ $ft o foo                               # 9) Order/optimize/pack
 ls -l foo.*
 
 for i in $*; do                         #10) Check everything is still there
-  cmp <($ft g foo k$i) <(echo $i$d240) >$n 2>&1 || echo mismatch at k$i
+  cmp <($ft g foo k$i) <(echo $i$d240) >$n 2>&1 || echo mismatch4 at k$i
 done
 
 echo hellooooooooooo,there > K0         #11) Add something new; Do NOT match k*
 $ft p foo K0
 
 for i in $*; do                         #12) Check EVERYthing is still there
-  cmp <($ft g foo k$i) <(echo $i$d240) >$n 2>&1 || echo mismatch at k$i
+  cmp <($ft g foo k$i) <(echo $i$d240) >$n 2>&1 || echo mismatch5 at k$i
 done
 cmp <($ft g foo K0) <(echo hellooooooooooo,there) >$n 2>&1 || echo K0 mismatch

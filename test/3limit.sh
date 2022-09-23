@@ -11,11 +11,11 @@ cd $td || {                             # work in test data directory
 rm -f foo.*                             # Clean up data files
 export lim=65536
 recz=256 $ft p foo k* || {              # 1) Hit limit first with data
-    echo 1>&2 "got expected error"
+    echo 1>&2 "got expected error1"
 }
 
 rm -f foo.*                             # Clean up data files
 export lim=71704
 recz=256 $ft p foo k* || {              # 2) Hit limit first with index
-    echo 1>&2 "got expected error"
+    echo 1>&2 "got expected error2"
 }
