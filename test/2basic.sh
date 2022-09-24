@@ -16,6 +16,7 @@ export dat0=2000
 #   dd if=foo.N256C ibs=24 skip=1 | nio pr .N256C | less
 # is not so bad but the binary nature of the free list + non-printable
 # filtering can make the latter less useful than simply "vim".
+echo "Testing put"
 $ft p foo k1*                           # 1) Populate with 3 distinct opens
 unset recz dat0
 $ft p foo k2*
@@ -27,11 +28,13 @@ $ft p foo k[3-9]*
   exit 2
 }
 
+echo "Testing get after put"
 for i in $*; do                         # 3) Check contents
   cmp <($ft g foo k$i) <(echo $i$d240) >$n 2>&1 || echo mismatch1 at k$i
 done
 
 # 4) delete some things across a few opens
+echo "Testing del after put"
 $ft d foo k1*
 $ft d foo k2*
 deleted=$(echo k[12]*|wc -w)
@@ -41,11 +44,13 @@ remain=$(($#-deleted))
   exit 3
 }
 
+echo "Testing get after del"
 for i in $*; do                         # Check contents
   case k$i in k[12]*) continue;; esac
   cmp <($ft g foo k$i) <(echo $i$d240) >$n 2>&1 || echo mismatch2 at k$i
 done
 
+echo "Testing del all"
 $ft d foo k[3-9]*                       # 5) delete the rest
 
 [ $($ft l foo | wc -l) = 0 ] || {       # 6) check that final result is empty
@@ -53,23 +58,28 @@ $ft d foo k[3-9]*                       # 5) delete the rest
   exit 4
 }
 
+echo "Testing re-populate"
 $ft p foo k*                            # 7) Re-populate
 
 for i in $*; do                         # 8) Check again
   cmp <($ft g foo k$i) <(echo $i$d240) >$n 2>&1 || echo mismatch3 at k$i
 done
 
+echo "Testing order/pack"
 ls -l foo.*
 $ft o foo                               # 9) Order/optimize/pack
 ls -l foo.*
 
+echo "Testing get after order/pack"
 for i in $*; do                         #10) Check everything is still there
   cmp <($ft g foo k$i) <(echo $i$d240) >$n 2>&1 || echo mismatch4 at k$i
 done
 
-echo hellooooooooooo,there > K0         #11) Add something new; Do NOT match k*
+echo "Testing put after order/pack"
+echo hellooooooooooo,there > K0         #11) Add new key; K* does NOT match k*
 $ft p foo K0
 
+echo "Testing get after put after order/pack"
 for i in $*; do                         #12) Check EVERYthing is still there
   cmp <($ft g foo k$i) <(echo $i$d240) >$n 2>&1 || echo mismatch5 at k$i
 done
