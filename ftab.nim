@@ -5,6 +5,7 @@
 ## 0..7 of a data file fixes record size (>=8) covering length prefixes.  Bytes
 ## 8..15 are a serial number.  Bytes 16..23 are the head of the free list.  Free
 ## list pointers are flipped (bitwise `not`) offsets with -1|nil-termination.
+## Bytes 0..7 of an index are an occupancy while 8..15 are a tomb counter.
 
 when (NimMajor,NimMinor,NimPatch) >= (1,4,0): {.push raises: [].} # [Defect]
 else: {.push raises: [].}                       # Earlier Nim have no Defect
@@ -65,6 +66,9 @@ const hMaskH = Hash((1 shl hBits) - 1)                  # get hash sfx from full
 func hsh(te: TabEnt): Hash = Hash(te.U8 shr (64-hBits)) # hash(key) suffix '>>>'
 const offMsk = U8((1 shl (64 - hBits)) - 1)
 func off(te: TabEnt): U8 = U8(te) and offMsk            # Get data offset
+const TOMB = TabEnt(1)      # impossible value since offset < data header
+func isTomb(te: TabEnt): bool = te.U8 == TOMB.U8
+func isOccu(te: TabEnt): bool = te.U8 != 0 and not te.isTomb
 
 # Accessors for keys & values from a table entry
 
@@ -83,15 +87,16 @@ func val(t: FTab, te: TabEnt): pointer =                # val offset
 # Accessors for file header metadata
 
 func occu(t: FTab): ptr U8 = cast[ptr U8](t.tabF.at 0)  # occupancy
-func tab(t: FTab): TEs     = cast[TEs](t.tabF.at 8)     # for .tab[]
+func tomb(t: FTab): ptr U8 = cast[ptr U8](t.tabF.at 8)  # tombstone count
+func tab(t: FTab): TEs     = cast[TEs](t.tabF.at 16)    # for .tab[]
 func recz*(t: FTab): U8   = cast[ptr U8](t.datF.at 0)[] # entry size
 func serN(t: FTab): ptr U8 = cast[ptr U8](t.datF.at 8)  # serial number
 func head(t: FTab): ptr U8 = cast[ptr U8](t.datF.at 16) # free list
 
 # Table size helper code/accessor
 
-func slots(c: int): int = 1 + nextPowerOfTwo(c * 16 div 13 + 16)  # Target size
-func slots(t: FTab): int = t.tabF.size div 8 - 1                  # Present size
+func slots(c: int): int = 2 + nextPowerOfTwo(c * 16 div 13 + 16)  # Target size
+func slots(t: FTab): int = t.tabF.size div 8 - 2                  # Present size
 func tooFull(c, s: int): bool = (c * 16 > s * 13) or (s < c + 16) # Should grow
 
 # More helper code to search|grow the table or to iterate the data
@@ -103,35 +108,38 @@ func hash(t: FTab, te: TabEnt): Hash =  # Cache this after len(key)?
 # an option to embed (well bounded?) key data in hash file.  Also due to such
 # workloads, should make checksummed record: kLen, key, kChk, vLen, val, totChk.
 
-func find(t: FTab, q: string|Region|TabEnt, h: Hash): int =
+func find(t: FTab, q: string|Region|TabEnt, h: Hash, isTomb: ptr bool=nil): int=
   let mask = t.slots - 1                # Basic linear-probe finder of the index
   var i = h and mask                    #..where `q` either is or should be.
-  while (let te = t.tab[i]; U8(te) != 0):
-    when q isnot TabEnt:
-      if (h and hMaskH) == te.hsh and q.len == t.kLen(te) and
+  var j = -1                            # First tomb or stays -1 if none
+  while (let te = t.tab[i]; te.U8 != 0):
+    when q isnot TabEnt:                # newTab TabEnt always finds a zero slot
+      if te.isTomb:
+        if j < 0: j = i                 # Save location of very first TOMB
+      elif (h and hMaskH) == te.hsh and q.len == t.kLen(te) and
         c_memcmp(t.key(te), q.mem, q.len.csize_t) == 0:
           return i
-    # else: growTab TabEnt branch always finds a novel key
     i = (i + 1) and mask
-  -i - 1                                # Missing insert @ -(result)-1
+  if j != -1:
+    isTomb[] = true
+  -(if j == -1: i else: j) - 1          # Missing insert @ -(result)-1
 
-proc growTab(t: var FTab): int =        # Grow table by making new & renaming
+proc newTab(t: var FTab, slots: int): int = # Re-form @new `slots` (by renaming)
   var mold = t.tabF                     # Old M)emFile & its table `tOld`
-  let tOld = cast[TEs](cast[uint](mold.at 8))
+  let tOld = cast[TEs](cast[uint](mold.at 16))
   let nOld = t.slots                    # Old number of slots
   let tmp  = t.tabN & ".tmp"            # New file path
-  if t.lim > 0 and (2*t.slots + 1)*8 + t.datF.size > t.lim:
+  if t.lim > 0 and (slots + 2)*8 + t.datF.size > t.lim:
     inf "FTab.growTab " & t.tabN & " OVER " & $t.lim
     return -1                           # Enforce limit/quota
   try:
-    t.tabF = mf.open(tmp, fmReadWrite, -1, 0, (2*t.slots + 1)*8, true)
+    t.tabF = mf.open(tmp, fmReadWrite, -1, 0, (slots + 2)*8, true)
   except:
     err "FTab.growTab cannot open & size \"" & tmp & "\""
     return -2
   for i in 0 ..< nOld:
-    if (let te = tOld[i]; te.U8 != 0):
-      let h = t.hash(te)
-      t.tab[-t.find(te, h) - 1] = te
+    if (let te = tOld[i]; te.isOccu):
+      t.tab[-t.find(te, t.hash(te)) - 1] = te
   t.occu[] = (cast[ptr U8](mold.at 0))[]
   try:
     mold.close
@@ -225,7 +233,8 @@ proc putRaw*(t: var FTab; key, val: Region): int =
   if recz > t.recz:
     err $recz & " bytes > \"" & t.datN & "\".recz=" & $ t.recz; return -2
   let h = key.hash
-  var i = t.find(key, h)
+  var isTomb = false
+  var i = t.find(key, h, isTomb.addr)
   if i >= 0:
     err "key \"" & $key & "\" present in \"" & t.datN & "\""
     return -3
@@ -239,14 +248,17 @@ proc putRaw*(t: var FTab; key, val: Region): int =
   copyMem t.datF.at(off + 4                 ), key.mem    , key.len
   copyMem t.datF.at(off + 4 + key.len.U8    ), valLen.addr, 4
   copyMem t.datF.at(off + 4 + key.len.U8 + 4), val.mem    , val.len
-  if tooFull(int(t.occu[]) + 1, t.slots):
-    if t.growTab < 0:
-      t.free off; return -1
+  if not isTomb and tooFull(int(t.occu[]) + int(t.tomb[]) + 1, t.slots):
+    let newSlots = if t.tomb[] > t.occu[]: t.slots else: 2*t.slots
+    if t.newTab(newSlots) < 0:  # No allowed room to grow the index.  Sadly, we
+      t.free off; return -1     #..unwind data even if there had been data room.
     i = t.find(key, h)
     grew = true
   i = -i - 1
-  t.tab[i] = TabEnt(U8((h and hMaskH) shl (64 - hBits)) or off)
-  t.occu[].inc
+  let te = TabEnt(U8((h and hMaskH)shl(64 - hBits)) or off)
+  t.tab[i] = te                 # VISIBLE to parallel get once store is done
+  t.occu[].inc            # Parallel readers see stale occu|tomb=>Cannot make..
+  if isTomb: t.tomb[].dec #..vital choices based on them; Should not need to.
   if grew: t.serN[].inc # Updating serial number should always be the last step
 
 proc put*(t: var FTab; key, val: string): int = t.putRaw(key.toRegion, val.toRegion)
@@ -254,27 +266,14 @@ proc put*(t: var FTab; key, val: string): int = t.putRaw(key.toRegion, val.toReg
   ## confusion with Nim's `add` which adds duplicate keys (disallowed here).
 
 func delRaw*(t: FTab; key: Region): int =
-  let h = key.hash              # 1) look up in index
+  let h = key.hash      # 1) look up in index
   var i = t.find(key, h)
-  if i < 0: return -1           # MISSING
-  t.free t.tab[i].off           # 2) free in data file
-  let mask = t.slots - 1        # 3) free in hash table
-  t.occu[].dec
-# TODO: Replace aging-friendly backshift delete w/tombstones to make lone-writer
-# multi-reader ~ok.  Costs tab rebuild even in steady state to clear out tombs.
-  block outer:                  # KnuthV3 Algo6.4R adapted for i=i+1, not i=i-1.
-    while true:                 # See: NIM/lib/pure/collections/tableimpl.nim
-      var j = i
-      var r = j
-      t.tab[i] = 0.TabEnt               # mark current EMPTY
-      while true:
-        i = (i + 1) and mask            # increment mod table size
-        if t.tab[i].int == 0:           # end of collision cluster; So all done
-          break outer
-        r = t.hash(t.tab[i]) and mask   # initial probe index for key@slot i
-        if not ((i >= r and r > j) or (r > j and j > i) or (j > i and i >= r)):
-          break
-      t.tab[j] = t.tab[i]               # [j] will be marked EMPTY next loop
+  if i < 0: return -1   # MISSING
+  let off = t.tab[i].off
+  t.tab[i] = TOMB       # 2) free in index; INVISIBLE to parallel get once done
+  t.occu[].dec  # Parallel readers may see stale occu|tomb => They cannot make
+  t.tomb[].inc  #..vital choices based on them, BUT should also not need to.
+  t.free off            # 3) free in data file; Crash recovery may un-delete
 
 func del*(t: FTab; key: string): int = t.delRaw(key.toRegion)
   ## Delete entry named by key.  Returns -1 if missing.
@@ -332,7 +331,7 @@ proc fTabIndex*(datNm, tabNm: string, tab0=24, lim=0): int =
       err "fTabIndex duplicate key in \"" & t.datN & "\""
       return -3
     if tooFull(int(t.occu[]) + 1, t.slots):
-      if t.growTab < 0: return -3
+      if t.newTab(2*t.slots) < 0: return -3 # Guess size from .datF.size/recsz?
       i = t.find(te, h)
     i = -i - 1
     t.tab[i] = te
@@ -397,7 +396,8 @@ proc fTabOpen*(datNm: string, tabNm="", mode=fmRead, recz = -1,
       result.datF = mf.open(datNm, fmReadWrite, -1, 0, dat0, true)
       (cast[ptr U8](result.datF.at 0))[] = recz.U8
       result.threadFree 24              # thread free space from offset 16
-      result.tabF = mf.open(tabNm, fmReadWrite, -1, 0, tab0.slots*8, true)
+      # nxpo2((9*16//13)+16)==32; Relates to putRaw: `if t.tomb[] > t.occu[]`.
+      result.tabF = mf.open(tabNm,fmReadWrite, -1,0, 8*slots(max(9,tab0)), true)
     except: discard
   if recz > 0 and result.recz != recz.U8:
     err "recz=" & $result.recz&" in "&datNm&" does not match open " & $recz.U8
@@ -424,29 +424,28 @@ proc fTabOrder*(datNm, tabNm: string): int =
   try:
     let d = system.open(datTmp, fmWrite)
     let t = system.open(tabTmp, fmWrite)
-    if d.writeBuffer(t0.datF.mem, 8) < 8: return -1 # Copy data header
-    if d.writeBuffer(t0.datF.at(8),8) < 8: return -2 # Result has no extra
-    if d.writeBuffer(minus1.addr, 8) < 8: return -3 # Result has no extra
-    if t.writeBuffer(t0.tabF.mem, 8) < 8: return -4 # Copy index header
+    if d.writeBuffer(t0.datF.mem, 16) < 16: return -1 # Copy data header
+    if d.writeBuffer(minus1.addr,  8) <  8: return -2 # No extra room in result
+    if t.writeBuffer(t0.tabF.mem, 16) < 16: return -3 # Copy index header
     var off = 24u64                                 # data header
-    for teO in countup(8u64, t0.tabF.size.U8 - 1, 8u64): #Copy recs in tab order
-      let te = cast[ptr U8](t0.tabF.at teO)[]   # Load TabEnt from offset
-      if te != 0:                               #TODO and !TOMB
+    for tabFo in countup(16u64, t0.tabF.size.U8 - 1, 8u64): # tab order rec copy
+      let te = cast[ptr U8](t0.tabF.at tabFo)[] # Load TabEnt from offset
+      if te.TabEnt.isOccu:
         let off0 = te and offMsk                # old data offset
-        if d.writeBuffer(t0.datF.at(off0), t0.recz) < t0.recz.int: return -5
+        if d.writeBuffer(t0.datF.at(off0), t0.recz) < t0.recz.int: return -4
         var te1 = (te and not offMsk) or off    # old hash sfx, new data offset
-        if t.writeBuffer(te1.addr, te1.sizeof) < te1.sizeof: return -6
+        if t.writeBuffer(te1.addr, te1.sizeof) < te1.sizeof: return -5
         off += t0.recz
-      else:
-        if t.writeBuffer(te.unsafeAddr, te.sizeof) < te.sizeof: return -7
+      else:                                     #NOTE: copies TOMB pollution
+        if t.writeBuffer(te.unsafeAddr, te.sizeof) < te.sizeof: return -6
     d.close
     t.close
-    if t0.close < 0: err "fTabOrder cannot close \"" & datNm & "\""; return -8
+    if t0.close < 0: err "fTabOrder cannot close \"" & datNm & "\""; return -7
     moveFile datTmp, datNm
     moveFile tabTmp, tabNm
   except:
     err "fTabOrder cannot make|populate \"" & datTmp & "\" | \"" & tabTmp & "\""
-    return -9
+    return -8
 
 when isMainModule: # Simple, self-contained driver CLI program for testing/etc.
   import std/strutils

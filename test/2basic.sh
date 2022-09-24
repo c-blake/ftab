@@ -12,7 +12,7 @@ rm -f foo.*                             # Clean up data file
 export recz=256 # Makes recz 0x100 & offsets from header 0x18 round-ish hex nums
                 # (i.e. not so hard to read in any endian-ness).
 export dat0=2000
-# A good way to look at the index is: nio pr -fL%x foo.NL|nl -v -1 |less
+# A good way to look at the index is: nio pr -fL%x foo.NL|nl -v -2 |less
 #   dd if=foo.N256C ibs=24 skip=1 | nio pr .N256C | less
 # is not so bad but the binary nature of the free list + non-printable
 # filtering can make the latter less useful than simply "vim".
