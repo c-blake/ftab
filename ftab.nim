@@ -169,13 +169,12 @@ proc growDat(t: var FTab): int =        # Grow file,thread free list w/new space
     let left = U8(t.lim - t.tabF.size - off0.int)
     if left >= t.recz:                  # Round to nearest for best fit can do
       off1 = off0 + U8(left div t.recz) * t.recz
-      inf "FTab.growDat NEAR LIMIT " & $t.lim & " ON \"" & t.datN & "\" " & $left
     else:                               # Enforce limit/quota
       inf "FTab.growDat OVER LIMIT " & $t.lim & " ON \"" & t.datN & "\""
       return -1
   try:
-    t.datF.resize off1.int              # Grow & remap # TODO fallocate|fallback
-  except:
+    t.datF.resize off1.int              # Grow & remap
+  except:       # TODO fallocate|fallback to not SEGV on a near full filesystem
     err "FTab.growDat cannot grow old FTab \"" & t.datN & "\""
     return -2
   t.threadFree off0
