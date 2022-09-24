@@ -45,18 +45,18 @@ type # The real beginning of this module with main types
     datF, tabF: MemFile # Memory mapped files
     lim: int            # Limit to total space used (sum of 2 `*F.size` fields)
     serial: U8          # serial number at open
-  Region* = (pointer, int)  ## Simple memory region type
+  Mem* = (pointer, int)  ## Simple memory region type
 
-# Region helpers
+# Mem helpers
 
-const NilRegion* = (nil, 0)               ## The Undefined Region
-proc mem*(r: Region): pointer = r[0]      ## Get its [0].addr
-func len*(r: Region): int = r[1]          ## Get its length
-func isNil*(r: Region): bool = r[0].isNil ## Test for being defined
-func hash*(r: Region): Hash =             ## Hash its data
-  hash(toOpenArray[byte](cast[ptr UncheckedArray[byte]](r[0]), 0, r[1] - 1))
-proc mem(q: string): pointer = q[0].unsafeAddr # make string compatible w/Region
-proc toRegion(s: string): Region =
+const NilMem* = (nil, 0)               ## The Undefined Mem
+proc mem*(m: Mem): pointer = m[0]      ## Get its [0].addr
+func len*(m: Mem): int = m[1]          ## Get its length
+func isNil*(m: Mem): bool = m[0].isNil ## Test for being defined
+func hash*(m: Mem): Hash =             ## Hash its data
+  hash(toOpenArray[byte](cast[ptr UncheckedArray[byte]](m[0]), 0, m[1] - 1))
+proc mem(q: string): pointer = q[0].unsafeAddr # make string compatible w/Mem
+proc toMem(s: string): Mem =
   result[0] = s[0].unsafeAddr; result[1] = s.len
 
 # Accessors for .off and .hsh in the table
@@ -102,13 +102,14 @@ func tooFull(c, s: int): bool = (c * 16 > s * 13) or (s < c + 16) # Should grow
 # More helper code to search|grow the table or to iterate the data
 
 func hash(t: FTab, te: TabEnt): Hash =  # Cache this after len(key)?
-  hash (t.key(te), t.kLen(te).int)      # .int critical to match `Region`
+  hash (t.key(te), t.kLen(te).int)      # .int critical to match `Mem`
 
 # TODO Some workloads frequently iterate over just keys w/kLen << 4096B => want
 # an option to embed (well bounded?) key data in hash file.  Also due to such
 # workloads, should make checksummed record: kLen, key, kChk, vLen, val, totChk.
+# Checksums will let readers confirm non-edit by writer during various copyouts.
 
-func find(t: FTab, q: string|Region|TabEnt, h: Hash, isTomb: ptr bool=nil): int=
+func find(t: FTab, q: string|Mem|TabEnt, h: Hash, isTomb: ptr bool=nil): int =
   let mask = t.slots - 1                # Basic linear-probe finder of the index
   var i = h and mask                    #..where `q` either is or should be.
   var j = -1                            # First tomb or stays -1 if none
@@ -201,34 +202,34 @@ template iterate(doYield) {.dirty.} =   # Logic to iterate data, skipping free
       let nV {.used.} = cast[ptr uint32](t.datF.at off + 4 + nK.U8)[]
       doYield
 
-iterator keys*(t: FTab): Region =
+iterator keys*(t: FTab): Mem =
   ## Iterate over just the keys in an open FTab file.
   iterate: yield (t.datF.at(off + 4), nK.int)
 
-iterator kVals*(t: FTab): (Region, Region) =    # Q: items?
+iterator kVals*(t: FTab): (Mem, Mem) =    # Q: items?
   ## Iterate over just the vals in an open FTab file.
   iterate: yield ((t.datF.at(off + 4), nK.int),
                   (t.datF.at(off + 4 + nK.U8 + 4), nV.int))
 
-func getRaw*(t: FTab; key: Region): Region =
+func getRaw*(t: FTab; key: Mem): Mem =
   ## Get value buffer for given `key` of length `nK` or `(nil,0)` if missing.
   let i = t.find(key, key.hash)
-  if i < 0: NilRegion else: (t.val(t.tab[i]), t.vN(t.tab[i]))
+  if i < 0: NilMem else: (t.val(t.tab[i]), t.vN(t.tab[i]))
 
-func getPtr*(t: FTab; key: string): Region =
+func getPtr*(t: FTab; key: string): Mem =
   ## Like `getRaw`, but take a Nim string parameter.
   let i = t.find(key, key.hash)
-  if i < 0: NilRegion else: (t.val(t.tab[i]), t.vN(t.tab[i]))
+  if i < 0: NilMem else: (t.val(t.tab[i]), t.vN(t.tab[i]))
 
-func `$`*(reg: Region): string =
-  if not reg.isNil:
-    result.setLen reg[1]
-    copyMem result[0].addr, reg[0], reg[1]
+func `$`*(m: Mem): string =
+  if not m.isNil:
+    result.setLen m[1]
+    copyMem result[0].addr, m[0], m[1]
 
 func get*(t: FTab; key: string): string = $t.getPtr(key)
   ## Alloc-copying call making a string to hold the result; "" if missing.
 
-proc putRaw*(t: var FTab; key, val: Region): int =
+proc putRaw*(t: var FTab; key, val: Mem): int =
   let recz = U8(key.len + val.len + 8)  # Data + k,vLen fields
   if recz > t.recz:
     err $recz & " bytes > \"" & t.datN & "\".recz=" & $ t.recz; return -2
@@ -261,11 +262,11 @@ proc putRaw*(t: var FTab; key, val: Region): int =
   if isTomb: t.tomb[].dec #..vital choices based on them; Should not need to.
   if grew: t.serN[].inc # Updating serial number should always be the last step
 
-proc put*(t: var FTab; key, val: string): int = t.putRaw(key.toRegion, val.toRegion)
+proc put*(t: var FTab; key, val: string): int = t.putRaw(key.toMem, val.toMem)
   ## Add (`key`, `val`) pair to an open, writable `FTab`. We use "put" to avoid
   ## confusion with Nim's `add` which adds duplicate keys (disallowed here).
 
-func delRaw*(t: FTab; key: Region): int =
+func delRaw*(t: FTab; key: Mem): int =
   let h = key.hash      # 1) look up in index
   var i = t.find(key, h)
   if i < 0: return -1   # MISSING
@@ -275,7 +276,7 @@ func delRaw*(t: FTab; key: Region): int =
   t.tomb[].inc  #..vital choices based on them, BUT should also not need to.
   t.free off            # 3) free in data file; Crash recovery may un-delete
 
-func del*(t: FTab; key: string): int = t.delRaw(key.toRegion)
+func del*(t: FTab; key: string): int = t.delRaw(key.toMem)
   ## Delete entry named by key.  Returns -1 if missing.
 
 proc close*(t: var FTab, pad=false): int = ## Release OS resources for open FTab.
