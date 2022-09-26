@@ -300,16 +300,23 @@ proc flush*(f: var MemFile; attempts: Natural = 3) =
         raiseOSError(lastErr, "error flushing mapping")
 
 when defined(posix) or defined(nimdoc):
-  proc resize*(f: var MemFile, newFileSize: int) {.raises: [IOError, OSError].} =
-    ## resize and re-map the file underlying an `allowRemap MemFile`.
+  proc resize*(f: var MemFile, newFileSize: int,
+               alloc=true) {.raises: [IOError, OSError].} =
+    ## Resize & re-map the file underlying an `allowRemap MemFile`.  If `alloc`
+    ## and `newFileSize>old` then file space is pre-allocated.
     ## **Note**: this assumes the entire file is mapped read-write at offset zero.
     ## Also, the value of `.mem` will probably change.
     ## **Note**: This is not (yet) available on Windows.
     when defined(posix):
       if f.handle == -1:
         raise newException(IOError,
-                            "Cannot resize MemFile opened with allowRemap=false")
-      if ftruncate(f.handle, newFileSize) == -1:
+                           "Cannot resize MemFile opened with allowRemap=false")
+      if alloc and newFileSize > f.size:
+        var e: cint # If new size is bigger, posix_fallocate also truncates up.
+        while (e=posix_fallocate(f.handle, 0, newFileSize); e == EINTR): discard
+        if e != 0:
+          raiseOSError(osLastError())
+      elif ftruncate(f.handle, newFileSize) == -1:
         raiseOSError(osLastError())
       when defined(linux): #Maybe NetBSD, too?
         #On Linux this can be over 100 times faster than a munmap,mmap cycle.
