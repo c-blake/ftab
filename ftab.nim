@@ -182,7 +182,7 @@ proc growDat(t: var FTab): int =        # Grow file,thread free list w/new space
       return -1
   try:
     t.datF.resize off1.int              # Grow & remap
-  except:       # TODO fallocate|fallback to not SEGV on a near full filesystem
+  except:
     err "FTab.growDat cannot grow old FTab \"" & t.datN & "\""
     return -2
   t.threadFree off0
