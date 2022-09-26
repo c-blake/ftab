@@ -39,12 +39,14 @@ type # The real beginning of this module with main types
   U8     = uint64                     # The 8-bit byte is a done deal..
   TabEnt = distinct uint64            # Hash-prefixed pointer from index->data
   TEs    = ptr UncheckedArray[TabEnt] # Hash table-structured array of those
+  GrowProc* = proc(f: MemFile, recz: U8): U8
   FTab* = object        ## A File Table With Deletable, Fixed-Size Entries
     mode: FileMode      # fmRead, fmReadWrite, fmRWExisting; No fmWrite,fmAppend
     datN, tabN: string  # Path names
     datF, tabF: MemFile # Memory mapped files
     lim: int            # Limit to total space used (sum of 2 `*F.size` fields)
     serial: U8          # serial number at open
+    grower*: GrowProc   ## growth policy encoded as a proc
   Mem* = (pointer, int)  ## Simple memory region type
 
 # Mem helpers
@@ -100,6 +102,12 @@ func slots(t: FTab): int = t.tabF.size div 8 - 2                  # Present size
 func tooFull(c, s: int): bool = (c * 16 > s * 13) or (s < c + 16) # Should grow
 
 # More helper code to search|grow the table or to iterate the data
+
+proc growerDefault*(f: MemFile, recz: U8): U8 =
+  ## Default growth policy.  This only really makes sense for `f` with
+  ## `allowRemap` in `fmReadWrite`.  In principle, a user policy could do an
+  ## fstatfs(f.handle) and base decisions upon filesystem free space.
+  f.size.U8 + 64*recz
 
 func hash(t: FTab, te: TabEnt): Hash =  # Cache this after len(key)?
   hash (t.key(te), t.kLen(te).int)      # .int critical to match `Mem`
@@ -164,7 +172,7 @@ proc threadFree(t: var FTab, off0: U8) = # thread new space into free list
 
 proc growDat(t: var FTab): int =        # Grow file,thread free list w/new space
   let off0 = t.datF.size.U8             # Old size
-  var off1 = off0 + 64 * t.recz         # New size
+  var off1 = t.grower(t.datF, t.recz)   # New size
   if t.lim > 0 and off1 + t.tabF.size.U8 > t.lim.U8:
     let left = U8(t.lim - t.tabF.size - off0.int)
     if left >= t.recz:                  # Round to nearest for best fit can do
@@ -309,7 +317,7 @@ proc fTabRepair*(datNm: string): int =
   discard # TODO repair; tricky-ish & not on critical path
 
 proc fTabOpen*(datNm: string, tabNm="", mode=fmRead, recz = -1,
-               dat0=0, tab0=24, lim=0): FTab
+               dat0=0, tab0=24, lim=0, grower=growerDefault): FTab
 
 proc fTabIndex*(datNm, tabNm: string, tab0=24, lim=0): int =
   ## Rebuild a hash index from the data file.
@@ -339,7 +347,7 @@ proc fTabIndex*(datNm, tabNm: string, tab0=24, lim=0): int =
   t.close
 
 proc fTabOpen*(datNm: string, tabNm="", mode=fmRead, recz = -1,
-               dat0=0, tab0=24, lim=0): FTab =
+               dat0=0, tab0=24, lim=0, grower=growerDefault): FTab =
   ## Open|make `FTab` file & its index.  `recz` is the fixed data record limit,
   ## only cross-checked for existing files (<0 => accept any).  For pre-sizing,
   ## `dat0` is an initial data size in bytes or if `<0` a flag saying to not
@@ -371,6 +379,7 @@ proc fTabOpen*(datNm: string, tabNm="", mode=fmRead, recz = -1,
 
   result.mode = mode ; result.lim  = lim
   result.tabN = tabNm; result.datN = datNm
+  result.grower = growerDefault
   if mode == fmRead:                    # 1) OPEN EXISTING READ-ONLY
     try:
       result.datF = mf.open(datNm); checkEndian()
