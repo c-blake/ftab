@@ -47,7 +47,7 @@ type # The real beginning of this module with main types
     lim: int            # Limit to total space used (sum of 2 `*F.size` fields)
     serial: U8          # serial number at open
     grower*: GrowProc   ## growth policy encoded as a proc
-  Mem* = (pointer, int)  ## Simple memory region type
+  Mem* = (pointer, int) ## Simple memory region type
 
 # Mem helpers
 
@@ -57,8 +57,8 @@ func len*(m: Mem): int = m[1]          ## Get its length
 func isNil*(m: Mem): bool = m[0].isNil ## Test for being defined
 func hash*(m: Mem): Hash =             ## Hash its data
   hash(toOpenArray[byte](cast[ptr UncheckedArray[byte]](m[0]), 0, m[1] - 1))
-proc mem(q: string): pointer = q[0].unsafeAddr # make string compatible w/Mem
-proc toMem(s: string): Mem =
+proc mem*(q: string): pointer = q[0].unsafeAddr # make string compatible w/Mem
+proc toMem*(s: string): Mem =
   result[0] = s[0].unsafeAddr; result[1] = s.len
 
 # Accessors for .off and .hsh in the table
