@@ -299,66 +299,65 @@ proc flush*(f: var MemFile; attempts: Natural = 3) =
       if lastErr != EBUSY.OSErrorCode:
         raiseOSError(lastErr, "error flushing mapping")
 
-when defined(posix) or defined(nimdoc):
-  proc resize*(f: var MemFile, newFileSize: int,
-               ensure=true) {.raises: [IOError, OSError].} =
-    ## Resize & re-map the file underlying an `allowRemap MemFile`.  If `ensure`
-    ## and `newFileSize>old` then file space is reserved to ensure room for new
-    ## virtual pages (but caller should wait often enough for `flush` to finish
-    ## to limit use of system RAM for write buffering).
-    ## **Note**: this assumes the entire file is mapped read-write at offset 0.
-    ## Also, the value of `.mem` will probably change.
-    if newFileSize < 1: # Q: include system/bitmasks & use PageSize ?
-      raise newException(IOError, "Cannot resize MemFile to < 1 byte")
-    when defined(posix):
-      if f.handle == -1:
-        raise newException(IOError,
-                           "Cannot resize MemFile opened with allowRemap=false")
-      if ensure and newFileSize > f.size:
-        var e: cint # If new size is bigger, posix_fallocate also truncates up.
-        while (e=posix_fallocate(f.handle, 0, newFileSize); e == EINTR): discard
-        if e != 0:
-          raiseOSError(osLastError())
-      elif ftruncate(f.handle, newFileSize) == -1:
+proc resize*(f: var MemFile, newFileSize: int,
+             ensure=true) {.raises: [IOError, OSError].} =
+  ## Resize & re-map the file underlying an `allowRemap MemFile`.  If `ensure`
+  ## and `newFileSize>old` then file space is reserved to ensure room for new
+  ## virtual pages (but caller should wait often enough for `flush` to finish to
+  ## limit use of system RAM for write buffering).
+  ## **Note**: this assumes the entire file is mapped read-write at offset 0.
+  ## Also, the value of `.mem` will probably change.
+  if newFileSize < 1: # Q: include system/bitmasks & use PageSize ?
+    raise newException(IOError, "Cannot resize MemFile to < 1 byte")
+  when defined(posix):
+    if f.handle == -1:
+      raise newException(IOError,
+                         "Cannot resize MemFile opened with allowRemap=false")
+    if ensure and newFileSize > f.size:
+      var e: cint # If new size is bigger, posix_fallocate also truncates up.
+      while (e=posix_fallocate(f.handle, 0, newFileSize); e == EINTR): discard
+      if e != 0:
         raiseOSError(osLastError())
-      when defined(linux): #Maybe NetBSD, too?
-        #On Linux this can be over 100 times faster than a munmap,mmap cycle.
-        proc mremap(old: pointer; oldSize, newSize: csize; flags: cint):
-            pointer {.importc: "mremap", header: "<sys/mman.h>".}
-        let newAddr = mremap(f.mem, csize(f.size), csize(newFileSize), cint(1))
-        if newAddr == cast[pointer](MAP_FAILED):
-          raiseOSError(osLastError())
-      else:
-        if munmap(f.mem, f.size) != 0:
-          raiseOSError(osLastError())
-        let newAddr = mmap(nil, newFileSize, PROT_READ or PROT_WRITE,
-                           f.flags, f.handle, 0)
-        if newAddr == cast[pointer](MAP_FAILED):
-          raiseOSError(osLastError())
-      f.mem = newAddr
+    elif ftruncate(f.handle, newFileSize) == -1:
+      raiseOSError(osLastError())
+    when defined(linux): #Maybe NetBSD, too?
+      #On Linux this can be over 100 times faster than a munmap,mmap cycle.
+      proc mremap(old: pointer; oldSize, newSize: csize; flags: cint):
+          pointer {.importc: "mremap", header: "<sys/mman.h>".}
+      let newAddr = mremap(f.mem, csize(f.size), csize(newFileSize), cint(1))
+      if newAddr == cast[pointer](MAP_FAILED):
+        raiseOSError(osLastError())
+    else:
+      if munmap(f.mem, f.size) != 0:
+        raiseOSError(osLastError())
+      let newAddr = mmap(nil, newFileSize, PROT_READ or PROT_WRITE,
+                         f.flags, f.handle, 0)
+      if newAddr == cast[pointer](MAP_FAILED):
+        raiseOSError(osLastError())
+    f.mem = newAddr
+    f.size = newFileSize
+  elif defined(windows):
+    if not f.wasOpened:
+      raise newException(IOError, "Cannot resize unopened MemFile")
+    if f.fHandle == INVALID_HANDLE_VALUE:
+      raise newException(IOError,
+                         "Cannot resize MemFile opened with allowRemap=false")
+    if newFileSize > f.size: # Seek to size & `setEndOfFile` => allocated.
+      var sizeHigh = int32(newFileSize shr 32)
+      let sizeLow  = int32(newFileSize and 0xffffffff)
+      let st = setFilePointer(f.fHandle, sizeLow, sizeHigh.addr, FILE_BEGIN)
+      let lastErr = osLastError().int32
+      if (st == INVALID_SET_FILE_POINTER and lastErr != NO_ERROR) or
+          (setEndOfFile(f.fHandle) == 0):
+        raiseOSError(osLastError())
+    if unmapViewOfFile(f.mem) != 0: # FS space now allocated; Re-do the view.
+      raiseOSError(osLastError())
+    if (let m = mapViewOfFileEx(f.mapHandle, FILE_MAP_READ or FILE_MAP_WRITE,
+                                0, WinSizeT(newFileSize), nil); m != nil):
+      f.mem  = m
       f.size = newFileSize
-    elif defined(windows):
-      if not f.wasOpened:
-        raise newException(IOError, "Cannot resize unopened MemFile")
-      if f.fHandle == INVALID_HANDLE_VALUE:
-        raise newException(IOError,
-                           "Cannot resize MemFile opened with allowRemap=false")
-      if newFileSize > f.size: # Seek to size & `setEndOfFile` => allocated.
-        var sizeHigh = int32(newFileSize shr 32)
-        let sizeLow  = int32(newFileSize and 0xffffffff)
-        let st = setFilePointer(f.fHandle, sizeLow, sizeHigh.addr, FILE_BEGIN)
-        let lastErr = osLastError().int32
-        if (st == INVALID_SET_FILE_POINTER and lastErr != NO_ERROR) or
-            (setEndOfFile(f.fHandle) == 0):
-          raiseOSError(osLastError())
-      if unmapViewOfFile(f.mem) != 0: # FS space now allocated; Re-do the view.
-        raiseOSError(osLastError())
-      if (let m = mapViewOfFileEx(f.mapHandle, FILE_MAP_READ or FILE_MAP_WRITE,
-                                  0, WinSizeT(newFileSize), nil); m != nil):
-        f.mem  = m
-        f.size = newFileSize
-      else:
-        raiseOSError(osLastError())
+    else:
+      raiseOSError(osLastError())
 
 proc close*(f: var MemFile) =
   ## closes the memory mapped file `f`. All changes are written back to the
