@@ -1,7 +1,7 @@
 While you can just run this targeting \`td\` at some 99% full FS, it
 is more system-friendly to instead prepare a small test filesystem.
 
-On Linux this can look like this (s/ext2/xfs/ or etc. if you want):
+On Linux this can look like this (s/ext4/xfs/ or etc. if you want):
   f=/var/tmp/f; dd if=/dev/zero of=\$f bs=1024 count=65536;mkfs.ext4 -i 1024 \$f
   mkdir /tmp/ft
   sudo mount -o loop,nodev,nosuid,noexec /var/tmp/fs /tmp/ft
