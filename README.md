@@ -78,23 +78,37 @@ of resilience to process crashes (but not OS crashes).
 Concurrent Safety
 -----------------
 
-On its own, this is lone-writer/multi-reader safe only in limited ways.  New
+On its own, this is one-writer/multi-reader safe only in limited ways.  New
 tables are always renamed into place atomically and there is a serial number to
 make parallel reader `refresh` calls fast (to get a new view on the index and
-data file as it grows).  It is still possible for the lone writer to delete &
-replace a record with new data after a reader-`refresh`, but before a reader
-finishes access.  There is a whole-file serial number a reader can check (say,
-saved before lookup and verified unchanged after copying out the data).
+data file as it grows).  It is still possible for the writer to delete & replace
+a record with new data after a reader-`refresh`, but before a reader finishes
+access.
 
-The serial number is mostly helpful for point queries.  Even with it, a reader
-iterating over all records just on the data file could still see partial updates
-and only know from a changed serial number that "something changed somewhere
-during a very long scan".  Adding a per record checksum to the end of each
-record is future work.
+Another whole-file serial number, saved by a reader before lookup and verified
+unchanged after copying out the data, could suffice for point queries.  Even
+with it, a reader iterating over all records just on the data file could still
+see partial updates and only know from a changed serial that "something changed
+somewhere during a very long scan".  Adding per key/per record checksums to the
+end of each record would suffice both for scans and point queries (future work).
 
 Crash Recovery
 --------------
 
-Crash recovery is also future work relating to adding an end of record checksum.
-Recovery can consist of rebuilding the index excluding all mismatching records.
-It is likely best for right now to not think of it as very crash recoverable.
+Crash recovery is also future work relating to adding checksums.  Recovery can
+consist of rebuilding the index excluding all mismatching records.  It is likely
+best for right now to not think of it as very crash recoverable.
+
+IO Tuning
+---------
+
+The index is very small at present, making point queries more|less 1-major fault
+in any likely worst case.  The trade-off is that if keys are much smaller than a
+4096B VM page, an FTab.keys iteration does 4096B/keySize more IO than it must.
+This can be quite a lot more.  For example, for 1 TiB of data in 64 KiB records
+with 32B keys, the IO is 4096\*16 MiBlocks = 64 GiB instead of only 0.5 GiB.
+So, besides checksums for both crash recovery and concurrent safety, another
+item of future work is optional direct embedding of nicely bounded whole keys
+(and their checksums) in the index file.  This needs to be a create-time option
+since users know better what workload of key scans vs. point queries may happen.
+In fact, it probably makes sense to do this before checksums.
