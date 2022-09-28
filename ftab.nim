@@ -1,7 +1,7 @@
 ## A file table (FTab) puts (kLen,key,vLen,val) unique-key fixed & bounded size
-## 4-tuples in a data file & an online, rebuildable index in another.  The data
-## is ground truth & always updated first.  When grown, new index files are made
-## & moved into place atomically for single-writer-multi-reader access.  Bytes
+## 4-tuples in a data file & an online, rebuildable index in another file.  The
+## data is ground truth & always updated first.  When grown, new index files are
+## made & moved into place atomically for 1-writer-multi-reader access.  Bytes
 ## 0..7 of a data file fixes record size (>=8) covering length prefixes.  Bytes
 ## 8..15 are a serial number.  Bytes 16..23 are the head of the free list.  Free
 ## list pointers are flipped (bitwise `not`) offsets with -1|nil-termination.
