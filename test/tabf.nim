@@ -1,4 +1,4 @@
-import std/[os, strutils], ftab # Simple, self-contained CLI prog for tests/etc.
+import std/[os, strutils], ../ftab # Simple,self-contained CLI prog for tests/..
 template match(s): untyped = paramStr(1).startsWith(s)
 let u = """Usage:
   ftab p)ut    FTAB FILE_A [..] put files FILE_A .. into FTAB.Lo, FTAB.NL

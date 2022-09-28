@@ -7,7 +7,7 @@
 # With other defaults, expect 2 different failure modes at limit=65536 & 71720.
 # In some sense this one program, run w/diff args replaces test/[0-4]*.
 
-import ftab, os, strutils, system/ansi_c
+import ../ftab, std/[os, strutils], system/ansi_c
 let base = if paramCount() >= 1: paramStr(1) else: "foo"
 let num  = if paramCount() >= 2: parseInt(paramStr(2)) else: 300
 let recz = if paramCount() >= 3: parseInt(paramStr(3)) else: 256
