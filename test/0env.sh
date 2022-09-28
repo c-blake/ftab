@@ -6,7 +6,7 @@
 : ${dat0:=2000}
 d60="abcdefghijklmnopqrstuvwxyz123456ABCDEFGHIJKLMNOPQRSTUVWXYZ,."
 t=$d60
-while [ ${#t} -lt $recz ]; do
+while [ ${#t} -lt $((recz-16)) ]; do
   d=$t
   t=$t$d60
 done
