@@ -367,17 +367,15 @@ proc fTabOpen*(datNm: string, tabNm="", mode=fmRead, recz = -1,
   template openTab(mode) =      # Open index file part, closing data on failure
     if tab0 < 0 and fTabIndex(datNm, tabNm, lim=lim) < 0:
       err "fTabOpen cannot rebuild index for \"" & datNm & "\""
-      closeDat()
-      return
+      closeDat(); return
     if dat0 >= 0:
       try:
         result.tabF = mf.open(tabNm, mode)
       except:
         err "fTabOpen cannot open " & tabNm
-        closeDat()
-        return
+        closeDat(); return
 
-  result.mode = mode ; result.lim  = lim
+  result.mode = mode ; result.lim  = lim  # MAIN LOGIC
   result.tabN = tabNm; result.datN = datNm
   result.grower = growerDefault
   if mode == fmRead:                    # 1) OPEN EXISTING READ-ONLY
@@ -403,11 +401,15 @@ proc fTabOpen*(datNm: string, tabNm="", mode=fmRead, recz = -1,
     try:
       let dat0 = if dat0 >= 0: 24 + roundUp(dat0 - 24, recz) else: recz + 24
       result.datF = mf.open(datNm, fmReadWrite, -1, 0, dat0, true)
-      (cast[ptr U8](result.datF.at 0))[] = recz.U8
-      result.threadFree 24              # thread free space from offset 16
-      # nxpo2((9*16//13)+16)==32; Relates to putRaw: `if t.tomb[] > t.occu[]`.
+    except:
+      err "fTabOpen cannot create " & datNm & " read-write"; return
+    (cast[ptr U8](result.datF.at 0))[] = recz.U8
+    result.threadFree 24                # thread free space from offset 24
+    try: # nxpo2((9*16//13)+16)==32; Relates to putRaw: `if t.tomb[] > t.occu[]`
       result.tabF = mf.open(tabNm,fmReadWrite, -1,0, 8*slots(max(9,tab0)), true)
-    except: discard
+    except:
+      err "fTabOpen cannot create " & tabNm & " read-write"
+      closeDat(); return
   if recz > 0 and result.recz != recz.U8:
     err "recz=" & $result.recz&" in "&datNm&" does not match open " & $recz.U8
     if result.close < 0:
