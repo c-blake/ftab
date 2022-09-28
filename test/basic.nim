@@ -1,5 +1,5 @@
 # Usage: ./test/basic [foo [300 [256 [0 [ReOrder]]]]]
-#                      BASE NUM RECZ LIMIT
+#                      BASE NUM RECZ LIMIT ANYARG=>ReOrder(needs space)
 # A good way to look at the index is: nio pr -fL%x foo.NL | nl -v -2 | less
 #   dd if=foo.Lo ibs=24 skip=1 | nio pr .N256C | less
 # is not bad for the data but the binary nature of the free list + non-printable
