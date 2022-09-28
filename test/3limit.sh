@@ -15,7 +15,7 @@ recz=256 $ft p foo k* || {              # 1) Hit limit first with data
 }
 
 rm -f foo.*                             # Clean up data files
-export lim=71704
+export lim=71720
 recz=256 $ft p foo k* || {              # 2) Hit limit first with index
     echo 1>&2 "got expected error2"
 }
