@@ -3,7 +3,7 @@
 
 . ${0%1gen.sh}0env.sh               # Mirror user call with .../test/x.sh
 # Generate some data files with distinct contents & names
-rm -rf $gd/*                        # clear out old
+rm -rf $gd/* || :                   # clear out old
 mkdir -p $gd                        # make new
 cd $gd                              # work in junk/
 
