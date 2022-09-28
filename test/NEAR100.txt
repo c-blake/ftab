@@ -1,0 +1,16 @@
+While you can just run this targeting \`td\` at some 99% full FS, it
+is more system-friendly to instead prepare a small test filesystem.
+
+On Linux this can look like this (s/ext2/xfs/ or etc. if you want):
+  f=/var/tmp/f; dd if=/dev/zero of=\$f bs=1024 count=65536;mkfs.ext4 -i 1024 \$f
+  mkdir /tmp/ft
+  sudo mount -o loop,nodev,nosuid,noexec /var/tmp/fs /tmp/ft
+  sudo chmod +t,a+rwx /tmp/ft/.
+
+Now you are ready to run this test to check ENOSPC for the index
+  recz=300 ./test/1gen.sh {1..29999}
+  recz=300 ./test/2basic.sh {1..29999}
+
+or this one to check ENOSPC for the data
+  recz=350 ./test/1gen.sh {1..29999}
+  recz=350 ./test/2basic.sh {1..29999}
