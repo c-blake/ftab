@@ -23,6 +23,8 @@ else:
   {.error: "the memfiles module is not supported on your operating system!".}
 
 import os, streams
+when not declared(csize_t):                     # Works back to Nim-0.20.2
+  type csize_t = csize
 
 proc newEIO(msg: string): ref IOError =
   new(result)
@@ -243,7 +245,10 @@ proc open*(filename: string, mode: FileMode = fmRead,
       fail(osLastError(), "error opening file")
 
     if newFileSize != -1:
-      if ftruncate(result.handle, newFileSize) == -1:
+      var e: cint # posix_fallocate truncates up when needed.
+      while (e=posix_fallocate(result.handle, 0, newFileSize); e == EINTR):
+        discard
+      if e != 0 and ftruncate(result.handle, newFileSize) == -1:
         fail(osLastError(), "error setting file size")
 
     if mappedSize != -1:
@@ -299,12 +304,11 @@ proc flush*(f: var MemFile; attempts: Natural = 3) =
       if lastErr != EBUSY.OSErrorCode:
         raiseOSError(lastErr, "error flushing mapping")
 
-proc resize*(f: var MemFile, newFileSize: int,
-             ensure=true) {.raises: [IOError, OSError].} =
-  ## Resize & re-map the file underlying an `allowRemap MemFile`.  If `ensure`
-  ## and `newFileSize>old` then file space is reserved to ensure room for new
-  ## virtual pages (but caller should wait often enough for `flush` to finish to
-  ## limit use of system RAM for write buffering).
+proc resize*(f: var MemFile, newFileSize: int) {.raises: [IOError, OSError].} =
+  ## Resize & re-map the file underlying an `allowRemap MemFile`.  If the OS/FS
+  ## supports it, file space is reserved to ensure room for new virtual pages.
+  ## Caller should wait often enough for `flush` to finish to limit use of
+  ## system RAM for write buffering, perhaps just prior to this call.
   ## **Note**: this assumes the entire file is mapped read-write at offset 0.
   ## Also, the value of `.mem` will probably change.
   if newFileSize < 1: # Q: include system/bitmasks & use PageSize ?
@@ -313,18 +317,16 @@ proc resize*(f: var MemFile, newFileSize: int,
     if f.handle == -1:
       raise newException(IOError,
                          "Cannot resize MemFile opened with allowRemap=false")
-    if ensure and newFileSize > f.size:
+    if newFileSize > f.size:
       var e: cint # If new size is bigger, posix_fallocate also truncates up.
       while (e=posix_fallocate(f.handle, 0, newFileSize); e == EINTR): discard
-      if e != 0:
+      if e != 0 and ftruncate(f.handle, newFileSize) == -1:
         raiseOSError(osLastError())
-    elif ftruncate(f.handle, newFileSize) == -1:
-      raiseOSError(osLastError())
     when defined(linux): #Maybe NetBSD, too?
       #On Linux this can be over 100 times faster than a munmap,mmap cycle.
-      proc mremap(old: pointer; oldSize, newSize: csize; flags: cint):
+      proc mremap(old: pointer; oldSize, newSize: csize_t; flags: cint):
           pointer {.importc: "mremap", header: "<sys/mman.h>".}
-      let newAddr = mremap(f.mem, csize(f.size), csize(newFileSize), cint(1))
+      let newAddr = mremap(f.mem, csize_t(f.size), csize_t(newFileSize), 1.cint)
       if newAddr == cast[pointer](MAP_FAILED):
         raiseOSError(osLastError())
     else:
@@ -439,7 +441,7 @@ iterator memSlices*(mfile: MemFile, delim = '\l', eat = '\r'): MemSlice {.inline
   ##       inc(count)
   ##   echo count
 
-  proc c_memchr(cstr: pointer, c: char, n: csize): pointer {.
+  proc c_memchr(cstr: pointer, c: char, n: csize_t): pointer {.
        importc: "memchr", header: "<string.h>".}
   proc `-!`(p, q: pointer): int {.inline.} = return cast[int](p) -% cast[int](q)
   var ms: MemSlice
@@ -447,7 +449,7 @@ iterator memSlices*(mfile: MemFile, delim = '\l', eat = '\r'): MemSlice {.inline
   ms.data = mfile.mem
   var remaining = mfile.size
   while remaining > 0:
-    ending = c_memchr(ms.data, delim, remaining)
+    ending = c_memchr(ms.data, delim, remaining.csize_t)
     if ending == nil: # unterminated final slice
       ms.size = remaining # Weird case..check eat?
       yield ms
