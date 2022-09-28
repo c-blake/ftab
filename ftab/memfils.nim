@@ -246,10 +246,11 @@ proc open*(filename: string, mode: FileMode = fmRead,
 
     if newFileSize != -1:
       var e: cint # posix_fallocate truncates up when needed.
-      while (e=posix_fallocate(result.handle, 0, newFileSize); e == EINTR):
-        discard
-      if e != 0 and ftruncate(result.handle, newFileSize) == -1:
+      while (e=posix_fallocate(result.handle, 0, newFileSize); e==EINTR):discard
+      if e in[EINVAL,EOPNOTSUPP]and ftruncate(result.handle, newFileSize) == -1:
         fail(osLastError(), "error setting file size")
+      elif e != 0: # ftruncate fallback arguable; More portable,but can now SEGV
+        fail(OSErrorCode(errno), "error setting file size")
 
     if mappedSize != -1:
       result.size = mappedSize
@@ -318,10 +319,12 @@ proc resize*(f: var MemFile, newFileSize: int) {.raises: [IOError, OSError].} =
       raise newException(IOError,
                          "Cannot resize MemFile opened with allowRemap=false")
     if newFileSize > f.size:
-      var e: cint # If new size is bigger, posix_fallocate also truncates up.
-      while (e=posix_fallocate(f.handle, 0, newFileSize); e == EINTR): discard
-      if e != 0 and ftruncate(f.handle, newFileSize) == -1:
+      var e: cint # posix_fallocate truncates up when needed.
+      while (e = posix_fallocate(f.handle, 0, newFileSize); e == EINTR): discard
+      if e in [EINVAL, EOPNOTSUPP] and ftruncate(f.handle, newFileSize) == -1:
         raiseOSError(osLastError())
+      elif e != 0: # ftruncate fallback arguable; More portable,but can now SEGV
+        raiseOSError(OSErrorCode(errno))
     when defined(linux): #Maybe NetBSD, too?
       #On Linux this can be over 100 times faster than a munmap,mmap cycle.
       proc mremap(old: pointer; oldSize, newSize: csize_t; flags: cint):
