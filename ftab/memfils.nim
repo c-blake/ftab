@@ -17,12 +17,18 @@
 
 when defined(windows):
   import winlean
+  when useWinUnicode and defined(nimPreviewSlimSystem):
+    import std/widestrs
 elif defined(posix):
   import posix
 else:
   {.error: "the memfiles module is not supported on your operating system!".}
 
 import os, streams
+
+when defined(nimPreviewSlimSystem):
+  import std/[syncio, assertions]
+
 when not declared(csize_t):                     # Works back to Nim-0.20.2
   type csize_t = csize
 
@@ -326,7 +332,7 @@ proc resize*(f: var MemFile, newFileSize: int) {.raises: [IOError, OSError].} =
       elif e != 0: # ftruncate fallback arguable; More portable,but can now SEGV
         raiseOSError(OSErrorCode(errno))
     when defined(linux): #Maybe NetBSD, too?
-      #On Linux this can be over 100 times faster than a munmap,mmap cycle.
+      # On Linux this can be over 100 times faster than a munmap,mmap cycle.
       proc mremap(old: pointer; oldSize, newSize: csize_t; flags: cint):
           pointer {.importc: "mremap", header: "<sys/mman.h>".}
       let newAddr = mremap(f.mem, csize_t(f.size), csize_t(newFileSize), 1.cint)
