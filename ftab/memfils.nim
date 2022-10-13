@@ -227,7 +227,7 @@ proc open*(filename: string, mode: FileMode = fmRead,
 
     result.wasOpened = true
     if not allowRemap and result.fHandle != INVALID_HANDLE_VALUE:
-      if closeHandle(result.fHandle) == 0:
+      if closeHandle(result.fHandle) != 0:
         result.fHandle = INVALID_HANDLE_VALUE
 
   else:
