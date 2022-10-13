@@ -361,7 +361,10 @@ proc resize*(f: var MemFile, newFileSize: int) {.raises: [IOError, OSError].} =
       if (st == INVALID_SET_FILE_POINTER and lastErr != NO_ERROR) or
           (setEndOfFile(f.fHandle) == 0):
         raiseOSError(osLastError())
-    if unmapViewOfFile(f.mem) != 0: # FS space now allocated; Re-do the view.
+    if unmapViewOfFile(f.mem) == 0 or closeHandle(f.mapHandle) == 0: # Un-do map
+      raiseOSError(osLastError())
+    f.mapHandle = createFileMappingW(f.fHandle, nil, PAGE_READWRITE, 0,0,nil)
+    if f.mapHandle == 0:                                             # Re-do map
       raiseOSError(osLastError())
     if (let m = mapViewOfFileEx(f.mapHandle, FILE_MAP_READ or FILE_MAP_WRITE,
                                 0, 0, WinSizeT(newFileSize), nil); m != nil):
