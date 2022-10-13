@@ -317,9 +317,9 @@ proc fTabRepair*(datNm: string): int =
   discard # TODO repair; tricky-ish & not on critical path
 
 proc fTabOpen*(datNm: string, tabNm="", mode=fmRead, recz = -1,
-               dat0=0, tab0=24, lim=0, grower=growerDefault): FTab
+               dat0=0, tab0=194, lim=0, grower=growerDefault): FTab
 
-proc fTabIndex*(datNm, tabNm: string, tab0=24, lim=0): int =
+proc fTabIndex*(datNm, tabNm: string, tab0=194, lim=0): int =
   ## Rebuild a hash index from the data file.
   if tabNm.fileExists:
     err "fTabIndex path=\"" & tabNm & "\" exists"
@@ -347,7 +347,7 @@ proc fTabIndex*(datNm, tabNm: string, tab0=24, lim=0): int =
   t.close
 
 proc fTabOpen*(datNm: string, tabNm="", mode=fmRead, recz = -1,
-               dat0=0, tab0=24, lim=0, grower=growerDefault): FTab =
+               dat0=0, tab0=194, lim=0, grower=growerDefault): FTab =
   ## Open|make `FTab` file & its index.  `recz` is the fixed data record limit,
   ## only cross-checked for existing files (<0 => accept any).  For pre-sizing,
   ## `dat0` is an initial data size in bytes or if `<0` a flag saying to not
@@ -406,7 +406,7 @@ proc fTabOpen*(datNm: string, tabNm="", mode=fmRead, recz = -1,
     (cast[ptr U8](result.datF.at 0))[] = recz.U8
     result.threadFree 24                # thread free space from offset 24
     try: # nxpo2((9*16//13)+16)==32; Relates to putRaw: `if t.tomb[] > t.occu[]`
-      result.tabF = mf.open(tabNm,fmReadWrite, -1,0, 8*slots(max(9,tab0)), true)
+      result.tabF = mf.open(tabNm,fmReadWrite,-1,0, 8*slots(max(194,tab0)),true)
     except:
       err "fTabOpen cannot create " & tabNm & " read-write"
       closeDat(); return
