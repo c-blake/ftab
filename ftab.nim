@@ -142,7 +142,7 @@ proc newTab(t: var FTab, slots: int): int = # Re-form @new `slots` (by renaming)
     inf "FTab.newTab " & t.tabN & " OVER " & $t.lim
     return -1                           # Enforce limit/quota
   try:
-    t.tabF = mf.open(tmp, fmReadWrite, -1, 0, (slots + 2)*8, true)
+    t.tabF = mf.open(tmp, fmReadWrite, -1, 0, (slots + 2)*8)
   except Exception as ex:
     err "FTab.newTab cannot open & size \"" & tmp & "\": " & ex.msg
     return -2
@@ -289,7 +289,6 @@ func del*(t: FTab; key: string): int = t.delRaw(key.toMem)
 proc close*(t: var FTab, pad=false): int = ## Release OS resources for open FTab.
   try:
     t.datF.close
-    t.datF.mem = nil
   except:
     err "FTab.del cannot close \"" & t.datN & "\""; result -= 1
   if t.tabF.mem != nil:
@@ -327,7 +326,7 @@ proc fTabIndex*(datNm, tabNm: string, tab0=194, lim=0): int =
   var t = fTabOpen(datNm, tabNm, fmReadWrite, dat0 = -1, lim=lim)
   if not t.isOpen: return -2
   try:
-    t.tabF = mf.open(tabNm, fmReadWrite, -1, 0, tab0.slots*8, true)
+    t.tabF = mf.open(tabNm, fmReadWrite, -1, 0, tab0.slots*8)
   except:
     err "fTabIndex cannot open | size \"" & tabNm & "\""
     return -2
@@ -406,7 +405,7 @@ proc fTabOpen*(datNm: string, tabNm="", mode=fmRead, recz = -1,
     (cast[ptr U8](result.datF.at 0))[] = recz.U8
     result.threadFree 24                # thread free space from offset 24
     try: # nxpo2((9*16//13)+16)==32; Relates to putRaw: `if t.tomb[] > t.occu[]`
-      result.tabF = mf.open(tabNm,fmReadWrite,-1,0, 8*slots(max(194,tab0)),true)
+      result.tabF = mf.open(tabNm,fmReadWrite,-1,0, 8*slots(max(194,tab0)))
     except:
       err "fTabOpen cannot create " & tabNm & " read-write"
       closeDat(); return
