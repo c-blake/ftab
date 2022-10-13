@@ -55,7 +55,7 @@ template fchk(tX, test, msg, exCode) {.dirty.} =
     for (k, v) in kVs:                  # Check contents
       if test:
         let (fv, nV) = tX.getPtr(k)
-        if cmemcmp(v[0].addr, fv, min(v.len, nV).csize_t) != 0:
+        if cmemcmp(v[0].unsafeAddr, fv, min(v.len, nV).csize_t) != 0:
           echo msg, " at ", k, "\nput: ", v, "\ngot: "
           discard stdout.writeBuffer(fv, nV); echo ""; quit msg, exCode
 
