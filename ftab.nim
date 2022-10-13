@@ -139,12 +139,12 @@ proc newTab(t: var FTab, slots: int): int = # Re-form @new `slots` (by renaming)
   let nOld = t.slots                    # Old number of slots
   let tmp  = t.tabN & ".tmp"            # New file path
   if t.lim > 0 and (slots + 2)*8 + t.datF.size > t.lim:
-    inf "FTab.growTab " & t.tabN & " OVER " & $t.lim
+    inf "FTab.newTab " & t.tabN & " OVER " & $t.lim
     return -1                           # Enforce limit/quota
   try:
     t.tabF = mf.open(tmp, fmReadWrite, -1, 0, (slots + 2)*8, true)
-  except:
-    err "FTab.growTab cannot open & size \"" & tmp & "\""
+  except Exception as ex:
+    err "FTab.newTab cannot open & size \"" & tmp & "\": " & ex.msg
     return -2
   for i in 0 ..< nOld:
     if (let te = tOld[i]; te.isOccu):
@@ -152,13 +152,13 @@ proc newTab(t: var FTab, slots: int): int = # Re-form @new `slots` (by renaming)
   t.occu[] = (cast[ptr U8](mold.at 0))[]
   try:
     mold.close
-  except:
-    err "FTab.growTab cannot close old FTab index \"" & t.tabN & "\""
+  except Exception as ex:
+    err "FTab.newTab cannot close old index \"" & t.tabN & "\": " & ex.msg
     return -3
   try:
     moveFile tmp, t.tabN                # Atomic replace
-  except:
-    err "FTab.growTab cannot replace old FTab index \"" & t.tabN & "\""
+  except Exception as ex:
+    err "FTab.newTab cannot replace old index \"" & t.tabN & "\": " & ex.msg
     return -4
 
 ################ SIMPLE FREE LIST BLOCK ALLOCATION SYSTEM ################
