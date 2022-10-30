@@ -9,6 +9,11 @@
 
 when (NimMajor,NimMinor,NimPatch) >= (1,4,0): {.push raises: [].} # [Defect]
 else: {.push raises: [].}                       # Earlier Nim have no Defect
+when declared(File):
+  template stdOpen(x: varargs[untyped]): untyped = system.open(x)
+else:
+  import std/syncio
+  template stdOpen(x: varargs[untyped]): untyped = syncio.open(x)
 when not declared(csize_t):                     # Works back to Nim-0.20.2
   type csize_t = csize
 
@@ -432,8 +437,8 @@ proc fTabOrder*(datNm, tabNm: string): int =
   let tabTmp = tabNm & ".new"
   var minus1 = not 0u64
   try:
-    let d = system.open(datTmp, fmWrite)
-    let t = system.open(tabTmp, fmWrite)
+    let d = stdOpen(datTmp, fmWrite)
+    let t = stdOpen(tabTmp, fmWrite)
     if d.writeBuffer(t0.datF.mem, 16) < 16: return -1 # Copy data header
     if d.writeBuffer(minus1.addr,  8) <  8: return -2 # No extra room in result
     if t.writeBuffer(t0.tabF.mem, 16) < 16: return -3 # Copy index header
