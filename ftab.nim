@@ -12,7 +12,7 @@ else: {.push raises: [].}                       # Earlier Nim have no Defect
 when declared(File):
   template stdOpen(x: varargs[untyped]): untyped = system.open(x)
 else:
-  import std/syncio
+  import std/syncio; export syncio
   template stdOpen(x: varargs[untyped]): untyped = syncio.open(x)
 when not declared(csize_t):                     # Works back to Nim-0.20.2
   type csize_t = csize
