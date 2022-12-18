@@ -7,8 +7,8 @@
 ## list pointers are flipped (bitwise `not`) offsets with -1|nil-termination.
 ## Bytes 0..7 of an index are an occupancy while 8..15 are a tomb counter.
 
-when (NimMajor,NimMinor,NimPatch) >= (1,4,0): {.push raises: [].} # [Defect]
-else: {.push raises: [].}                       # Earlier Nim have no Defect
+# when (NimMajor,NimMinor,NimPatch) >= (1,4,0): {.push raises: [].} # [Defect]
+# else: {.push raises: [].}                       # Earlier Nim have no Defect
 when declared(File):
   template stdOpen(x: varargs[untyped]): untyped = system.open(x)
 else:
@@ -16,6 +16,7 @@ else:
   template stdOpen(x: varargs[untyped]): untyped = syncio.open(x)
 when not declared(csize_t):                     # Works back to Nim-0.20.2
   type csize_t = csize
+type Ce = CatchableError
 
 import std/[hashes, os, options, math], ftab/memfils as mf, system/ansi_c
 
@@ -23,8 +24,8 @@ template tryImport(module) =    # if `chronicles` is installed, use it unless
   import module                 # `-d:chronicles_enabled=off` is also given.
 
 template errFallback {.used.} = # define fallback not requiring 10 pkgs to log.
-  proc inf(s: string) = (try: stderr.write(s, "\n") except: discard)
-  proc err(s: string) = (try: stderr.write(s, "\n") except: discard)
+  proc inf(s: string) = (try: stderr.write(s, "\n") except Ce: discard)
+  proc err(s: string) = (try: stderr.write(s, "\n") except Ce: discard)
 
 when compiles(tryImport pkg/chronicles):
   import pkg/chronicles/../chronicles
@@ -148,7 +149,7 @@ proc newTab(t: var FTab, slots: int): int = # Re-form @new `slots` (by renaming)
     return -1                           # Enforce limit/quota
   try:
     t.tabF = mf.open(tmp, fmReadWrite, -1, 0, (slots + 2)*8)
-  except Exception as ex:
+  except Ce as ex:
     err "FTab.newTab cannot open & size \"" & tmp & "\": " & ex.msg
     return -2
   for i in 0 ..< nOld:
@@ -157,12 +158,12 @@ proc newTab(t: var FTab, slots: int): int = # Re-form @new `slots` (by renaming)
   t.occu[] = (cast[ptr U8](mold.at 0))[]
   try:
     mold.close
-  except Exception as ex:
+  except Ce as ex:
     err "FTab.newTab cannot close old index \"" & t.tabN & "\": " & ex.msg
     return -3
   try:
     moveFile tmp, t.tabN                # Atomic replace
-  except Exception as ex:
+  except Ce as ex: # This does re-`raise` -> Exception -> breaks `raises`
     err "FTab.newTab cannot replace old index \"" & t.tabN & "\": " & ex.msg
     return -4
 
@@ -187,7 +188,7 @@ proc growDat(t: var FTab): int =        # Grow file,thread free list w/new space
       return -1
   try:
     t.datF.resize off1.int              # Grow & remap
-  except:
+  except Ce:
     err "FTab.growDat cannot grow old FTab \"" & t.datN & "\""
     return -2
   t.threadFree off0
@@ -294,11 +295,11 @@ func del*(t: FTab; key: string): int = t.delRaw(key.toMem)
 proc close*(t: var FTab, pad=false): int = ## Release OS resources for open FTab.
   try:
     t.datF.close
-  except:
+  except Ce:
     err "FTab.del cannot close \"" & t.datN & "\""; result -= 1
   if t.tabF.mem != nil:
-    try   : t.tabF.close
-    except: err "FTab.del cannot close \"" & t.tabN & "\""; result -= 1
+    try      : t.tabF.close
+    except Ce: err "FTab.del cannot close \"" & t.tabN & "\""; result -= 1
 
 func isOpen*(t: FTab): bool = ## Test if successfully opened & still open
   t.datF.mem != nil
@@ -307,11 +308,11 @@ proc flush*(t: var FTab, index=false): int =
   ## Flush data to stable storage or return < 0.  Index is optional & off by
   ## default to avoid long pauses from big table writes.  Instead, rely on
   ## service management & post-crash index rebuild ability for that reliability.
-  try   : t.datF.flush  # Should be as incremental as new record puts is.
-  except: result -= 1
+  try      : t.datF.flush   # Should be as incremental as new record puts is.
+  except Ce: result -= 1
   if index:
-    try   : t.tabF.flush
-    except: result -= 1
+    try      : t.tabF.flush
+    except Ce: result -= 1
 
 proc fTabRepair*(datNm: string): int =
   ## Recover post-unclean .close by studying unused `kLen<0` space in data.  To
@@ -332,7 +333,7 @@ proc fTabIndex*(datNm, tabNm: string, tab0=194, lim=0): int =
   if not t.isOpen: return -2
   try:
     t.tabF = mf.open(tabNm, fmReadWrite, -1, 0, tab0.slots*8)
-  except:
+  except Ce:
     err "fTabIndex cannot open | size \"" & tabNm & "\""
     return -2
   for (n, k) in t.keys:
@@ -362,10 +363,8 @@ proc fTabOpen*(datNm: string, tabNm="", mode=fmRead, recz = -1,
       err "fTabOpen endian-ness of CPU reversed from data file " & datNm
 
   template closeDat =           # Clean up data file part
-    try:
-      result.datF.close
-    except:
-      err "fTabOpen cannot close just opened \"" & datNm & "\""
+    try      : result.datF.close
+    except Ce: err "fTabOpen cannot close just opened \"" & datNm & "\""
     result.datF.mem = nil
 
   template openTab(mode) =      # Open index file part, closing data on failure
@@ -373,9 +372,8 @@ proc fTabOpen*(datNm: string, tabNm="", mode=fmRead, recz = -1,
       err "fTabOpen cannot rebuild index for \"" & datNm & "\""
       closeDat(); return
     if dat0 >= 0:
-      try:
-        result.tabF = mf.open(tabNm, mode)
-      except:
+      try      : result.tabF = mf.open(tabNm, mode)
+      except Ce:
         err "fTabOpen cannot open " & tabNm
         closeDat(); return
 
@@ -385,7 +383,7 @@ proc fTabOpen*(datNm: string, tabNm="", mode=fmRead, recz = -1,
   if mode == fmRead:                    # 1) OPEN EXISTING READ-ONLY
     try:
       result.datF = mf.open(datNm); checkEndian()
-    except:
+    except Ce:
       err "fTabOpen cannot open " & datNm & " read-only"
       result.datF.mem = nil             # Just in case; Probably already nil
       return
@@ -393,7 +391,7 @@ proc fTabOpen*(datNm: string, tabNm="", mode=fmRead, recz = -1,
   elif fileExists datNm:                # 2) OPEN EXISTING READ-WRITE
     try:
       result.datF = mf.open(datNm, fmReadWrite, allowRemap=true); checkEndian()
-    except:
+    except Ce:
       err "fTabOpen cannot open " & datNm & " read-write"
       result.datF.mem = nil
       return
@@ -405,13 +403,13 @@ proc fTabOpen*(datNm: string, tabNm="", mode=fmRead, recz = -1,
     try:
       let dat0 = if dat0 >= 0: 24 + roundUp(dat0 - 24, recz) else: recz + 24
       result.datF = mf.open(datNm, fmReadWrite, -1, 0, dat0, true)
-    except:
+    except Ce:
       err "fTabOpen cannot create " & datNm & " read-write"; return
     (cast[ptr U8](result.datF.at 0))[] = recz.U8
     result.threadFree 24                # thread free space from offset 24
     try: # nxpo2((9*16//13)+16)==32; Relates to putRaw: `if t.tomb[] > t.occu[]`
       result.tabF = mf.open(tabNm,fmReadWrite,-1,0, 8*slots(max(194,tab0)))
-    except:
+    except Ce:
       err "fTabOpen cannot create " & tabNm & " read-write"
       closeDat(); return
   if recz > 0 and result.recz != recz.U8:
@@ -458,6 +456,6 @@ proc fTabOrder*(datNm, tabNm: string): int =
     if t0.close < 0: err "fTabOrder cannot close \"" & datNm & "\""; return -7
     moveFile datTmp, datNm
     moveFile tabTmp, tabNm
-  except:
+  except Ce:
     err "fTabOrder cannot make|populate \"" & datTmp & "\" | \"" & tabTmp & "\""
     return -8

@@ -18,7 +18,7 @@ let idx = base & ".NL"
 try:                                    # 0) Clean up any stale data files
   if log.fileExists: log.removeFile
   if idx.fileExists: idx.removeFile
-except: quit "could not remove an old ftab file", 1
+except CatchableError: quit "could not remove an old ftab file", 1
 
 proc genKVs(recz: int): seq[(string, string)] =
   const d60 = "abcdefghijklmnopqrstuvwxyz123456ABCDEFGHIJKLMNOPQRSTUVWXYZ,."
