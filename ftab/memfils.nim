@@ -151,17 +151,16 @@ proc open*(filename: string, mode: FileMode = fmRead,
   ## Example:
   ##
   ## .. code-block:: nim
-  ##   var
-  ##     mm, mm_full, mm_half: MemFile
+  ##   var mm, mm_full, mm_half: MemFile   # Make a new file
   ##
-  ##   mm = memfiles.open("/tmp/test.mmap", mode = fmWrite, newFileSize = 1024)    # Create a new file
+  ##   mm = memfiles.open("/tmp/test.mmap", mode = fmWrite, newFileSize = 1024)
   ##   mm.close()
   ##
   ##   # Read the whole file, would fail if newFileSize was set
-  ##   mm_full = memfiles.open("/tmp/test.mmap", mode = fmReadWrite, mappedSize = -1)
+  ##   mm_full = memfiles.open("/tmp/t.mmap", mode=fmReadWrite, mappedSize = -1)
   ##
   ##   # Read the first 512 bytes
-  ##   mm_half = memfiles.open("/tmp/test.mmap", mode = fmReadWrite, mappedSize = 512)
+  ##   mm_half = memfiles.open("/tmp/t.mmap", mode=fmReadWrite, mappedSize=512)
 
   # The file can be resized only when write mode is used:
   if mode == fmAppend:
@@ -409,8 +408,8 @@ proc close*(f: var MemFile) =
 
   if error: raiseOSError(lastErr)
 
-type MemSlice* = object ## represent slice of a MemFile for iteration over delimited lines/records
-  data*: pointer
+type MemSlice* = object ## Represent slice of a MemFile
+  data*: pointer        ## This is for iteration over delimited lines/records
   size*: int
 
 proc `==`*(x, y: MemSlice): bool =
@@ -422,11 +421,12 @@ proc `$`*(ms: MemSlice): string {.inline.} =
   result.setLen(ms.size)
   copyMem(addr(result[0]), ms.data, ms.size)
 
-iterator memSlices*(mfile: MemFile, delim = '\l', eat = '\r'): MemSlice {.inline.} =
-  ## Iterates over \[optional `eat`] `delim`-delimited slices in MemFile `mfile`.
+iterator memSlices*(mfile: MemFile, delim = '\l', eat = '\r'):
+  MemSlice {.inline.} =
+  ## Iterate over \[optional `eat`] `delim`-delimited slices in MemFile `mfile`.
   ##
-  ## Default parameters parse lines ending in either Unix(\\l) or Windows(\\r\\l)
-  ## style on on a line-by-line basis.  I.e., not every line needs the same ending.
+  ## Default parameters parse lines ending in either Unix (\\l) or Windows
+  ## (\\r\\l) style on on a line-by-line basis (i.e. line endings can vary).
   ## Unlike readLine(File) & lines(File), archaic MacOS9 \\r-delimited lines
   ## are not supported as a third option for each line.  Such archaic MacOS9
   ## files can be handled by passing delim='\\r', eat='\\0', though.
@@ -468,7 +468,7 @@ iterator memSlices*(mfile: MemFile, delim = '\l', eat = '\r'): MemSlice {.inline
       yield ms
       break
     ms.size = ending -! ms.data # delim is NOT included
-    if eat != '\0' and ms.size > 0 and cast[cstring](ms.data)[ms.size - 1] == eat:
+    if eat != '\0' and ms.size>0 and cast[cstring](ms.data)[ms.size - 1] == eat:
       dec(ms.size) # trim pre-delim char
     yield ms
     ms.data = cast[pointer](cast[int](ending) +% 1) # skip delim
@@ -511,7 +511,7 @@ iterator lines*(mfile: MemFile, delim = '\l', eat = '\r'): string {.inline.} =
     yield buf
 
 type
-  MemMapFileStream* = ref MemMapFileStreamObj ## a stream that encapsulates a `MemFile`
+  MemMapFileStream* = ref MemMapFileStreamObj ##Stream encapsulating a `MemFile`
   MemMapFileStreamObj* = object of Stream
     mf: MemFile
     mode: FileMode
@@ -523,8 +523,9 @@ proc mmsClose(s: Stream) =
 
 proc mmsFlush(s: Stream) = flush(MemMapFileStream(s).mf)
 
-proc mmsAtEnd(s: Stream): bool = (MemMapFileStream(s).pos >= MemMapFileStream(s).mf.size) or
-                                  (MemMapFileStream(s).pos < 0)
+proc mmsAtEnd(s: Stream): bool =
+  (MemMapFileStream(s).pos >= MemMapFileStream(s).mf.size) or
+    (MemMapFileStream(s).pos < 0)
 
 proc mmsSetPosition(s: Stream, pos: int) =
   if pos > MemMapFileStream(s).mf.size or pos < 0:

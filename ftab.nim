@@ -292,7 +292,7 @@ func delRaw*(t: FTab; key: Mem): int =
 func del*(t: FTab; key: string): int = t.delRaw(key.toMem)
   ## Delete entry named by key.  Returns -1 if missing.
 
-proc close*(t: var FTab, pad=false): int = ## Release OS resources for open FTab.
+proc close*(t: var FTab, pad=false): int = ## Release OS resources for open FTab
   try:
     t.datF.close
   except Ce:
