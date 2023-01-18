@@ -320,7 +320,32 @@ proc resize*(f: var MemFile, newFileSize: int) {.raises: [IOError, OSError].} =
   ## Also, the value of `.mem` will probably change.
   if newFileSize < 1: # Q: include system/bitmasks & use PageSize ?
     raise newException(IOError, "Cannot resize MemFile to < 1 byte")
-  when defined(posix):
+  when defined(windows):
+    if not f.wasOpened:
+      raise newException(IOError, "Cannot resize unopened MemFile")
+    if f.fHandle == INVALID_HANDLE_VALUE:
+      raise newException(IOError,
+                         "Cannot resize MemFile opened with allowRemap=false")
+    if newFileSize > f.size: # Seek to size & `setEndOfFile` => allocated.
+      var sizeHigh = int32(newFileSize shr 32)
+      let sizeLow  = int32(newFileSize and 0xffffffff)
+      let st = setFilePointer(f.fHandle, sizeLow, sizeHigh.addr, FILE_BEGIN)
+      let lastErr = osLastError().int32
+      if (st == INVALID_SET_FILE_POINTER and lastErr != NO_ERROR) or
+          (setEndOfFile(f.fHandle) == 0):
+        raiseOSError(osLastError())
+    if unmapViewOfFile(f.mem) == 0 or closeHandle(f.mapHandle) == 0: # Un-do map
+      raiseOSError(osLastError())
+    f.mapHandle = createFileMappingW(f.fHandle, nil, PAGE_READWRITE, 0,0,nil)
+    if f.mapHandle == 0:                                             # Re-do map
+      raiseOSError(osLastError())
+    if (let m = mapViewOfFileEx(f.mapHandle, FILE_MAP_READ or FILE_MAP_WRITE,
+                                0, 0, WinSizeT(newFileSize), nil); m != nil):
+      f.mem  = m
+      f.size = newFileSize
+    else:
+      raiseOSError(osLastError())
+  elif defined(posix):
     if f.handle == -1:
       raise newException(IOError,
                          "Cannot resize MemFile opened with allowRemap=false")
@@ -347,31 +372,6 @@ proc resize*(f: var MemFile, newFileSize: int) {.raises: [IOError, OSError].} =
         raiseOSError(osLastError())
     f.mem = newAddr
     f.size = newFileSize
-  elif defined(windows):
-    if not f.wasOpened:
-      raise newException(IOError, "Cannot resize unopened MemFile")
-    if f.fHandle == INVALID_HANDLE_VALUE:
-      raise newException(IOError,
-                         "Cannot resize MemFile opened with allowRemap=false")
-    if newFileSize > f.size: # Seek to size & `setEndOfFile` => allocated.
-      var sizeHigh = int32(newFileSize shr 32)
-      let sizeLow  = int32(newFileSize and 0xffffffff)
-      let st = setFilePointer(f.fHandle, sizeLow, sizeHigh.addr, FILE_BEGIN)
-      let lastErr = osLastError().int32
-      if (st == INVALID_SET_FILE_POINTER and lastErr != NO_ERROR) or
-          (setEndOfFile(f.fHandle) == 0):
-        raiseOSError(osLastError())
-    if unmapViewOfFile(f.mem) == 0 or closeHandle(f.mapHandle) == 0: # Un-do map
-      raiseOSError(osLastError())
-    f.mapHandle = createFileMappingW(f.fHandle, nil, PAGE_READWRITE, 0,0,nil)
-    if f.mapHandle == 0:                                             # Re-do map
-      raiseOSError(osLastError())
-    if (let m = mapViewOfFileEx(f.mapHandle, FILE_MAP_READ or FILE_MAP_WRITE,
-                                0, 0, WinSizeT(newFileSize), nil); m != nil):
-      f.mem  = m
-      f.size = newFileSize
-    else:
-      raiseOSError(osLastError())
 
 proc close*(f: var MemFile) =
   ## closes the memory mapped file `f`. All changes are written back to the
