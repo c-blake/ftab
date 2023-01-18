@@ -36,6 +36,30 @@ proc newEIO(msg: string): ref IOError =
   new(result)
   result.msg = msg
 
+proc setFileSize*(fh: FileHandle, newFileSize = -1): OSErrorCode =
+  ## Set the size of open file pointed to by `fh` to `newFileSize` if != -1.
+  ## Space is only allocated if this is cheaper than writing to the file.  This
+  ## routine returns the last OSErrorCode found rather than raising to support
+  ## old rollback/clean-up code style.  [ This should really be in std/os. ]
+  if newFileSize == -1:
+    return
+  when defined(windows):
+    var sizeHigh = int32(newFileSize shr 32)
+    let sizeLow = int32(newFileSize and 0xffffffff)
+    let status = setFilePointer(fh, sizeLow, addr(sizeHigh), FILE_BEGIN)
+    let lastErr = osLastError()
+    if (status == INVALID_SET_FILE_POINTER and lastErr.int32 != NO_ERROR) or
+        setEndOfFile(fh) == 0:
+      result = lastErr
+  else:
+    var e: cint # posix_fallocate truncates up when needed.
+    while (e = posix_fallocate(fh, 0, newFileSize); e == EINTR):
+      discard
+    if e in [EINVAL, EOPNOTSUPP] and ftruncate(fh, newFileSize) == -1:
+      result = osLastError()
+    elif e != 0: # ftruncate fallback arguable; More portable,but can now SEGV
+      result = osLastError()
+
 type
   MemFile* = object      ## represents a memory mapped file
     mem*: pointer        ## a pointer to the memory mapped file. The pointer
@@ -183,17 +207,8 @@ proc open*(filename: string, mode: FileMode = fmRead,
     if result.fHandle == INVALID_HANDLE_VALUE:
       fail(osLastError(), "error opening file")
 
-    if newFileSize != -1:
-      var
-        sizeHigh = int32(newFileSize shr 32)
-        sizeLow = int32(newFileSize and 0xffffffff)
-
-      var status = setFilePointer(result.fHandle, sizeLow, addr(sizeHigh),
-                                  FILE_BEGIN)
-      let lastErr = osLastError()
-      if (status == INVALID_SET_FILE_POINTER and lastErr.int32 != NO_ERROR) or
-          (setEndOfFile(result.fHandle) == 0):
-        fail(lastErr, "error setting file size")
+    if (let e = setFileSize(result.fHandle.FileHandle, newFileSize);
+        e != 0.OSErrorCode): fail(e, "error setting file size")
 
     # since the strings are always 'nil', we simply always call
     # CreateFileMappingW which should be slightly faster anyway:
@@ -250,13 +265,8 @@ proc open*(filename: string, mode: FileMode = fmRead,
       # Is there an exception that wraps it?
       fail(osLastError(), "error opening file")
 
-    if newFileSize != -1:
-      var e: cint # posix_fallocate truncates up when needed.
-      while (e=posix_fallocate(result.handle, 0, newFileSize); e==EINTR):discard
-      if e in[EINVAL,EOPNOTSUPP]and ftruncate(result.handle, newFileSize) == -1:
-        fail(osLastError(), "error setting file size")
-      elif e != 0: # ftruncate fallback arguable; More portable,but can now SEGV
-        fail(OSErrorCode(errno), "error setting file size")
+    if (let e = setFileSize(result.handle.FileHandle, newFileSize);
+        e != 0.OSErrorCode): fail(e, "error setting file size")
 
     if mappedSize != -1:
       result.size = mappedSize
@@ -327,13 +337,8 @@ proc resize*(f: var MemFile, newFileSize: int) {.raises: [IOError, OSError].} =
       raise newException(IOError,
                          "Cannot resize MemFile opened with allowRemap=false")
     if newFileSize > f.size: # Seek to size & `setEndOfFile` => allocated.
-      var sizeHigh = int32(newFileSize shr 32)
-      let sizeLow  = int32(newFileSize and 0xffffffff)
-      let st = setFilePointer(f.fHandle, sizeLow, sizeHigh.addr, FILE_BEGIN)
-      let lastErr = osLastError().int32
-      if (st == INVALID_SET_FILE_POINTER and lastErr != NO_ERROR) or
-          (setEndOfFile(f.fHandle) == 0):
-        raiseOSError(osLastError())
+      if (let e = setFileSize(f.fHandle.FileHandle, newFileSize);
+          e != 0.OSErrorCode): raiseOSError(e)
     if unmapViewOfFile(f.mem) == 0 or closeHandle(f.mapHandle) == 0: # Un-do map
       raiseOSError(osLastError())
     f.mapHandle = createFileMappingW(f.fHandle, nil, PAGE_READWRITE, 0,0,nil)
@@ -350,12 +355,8 @@ proc resize*(f: var MemFile, newFileSize: int) {.raises: [IOError, OSError].} =
       raise newException(IOError,
                          "Cannot resize MemFile opened with allowRemap=false")
     if newFileSize > f.size:
-      var e: cint # posix_fallocate truncates up when needed.
-      while (e = posix_fallocate(f.handle, 0, newFileSize); e == EINTR): discard
-      if e in [EINVAL, EOPNOTSUPP] and ftruncate(f.handle, newFileSize) == -1:
-        raiseOSError(osLastError())
-      elif e != 0: # ftruncate fallback arguable; More portable,but can now SEGV
-        raiseOSError(OSErrorCode(errno))
+      if (let e = setFileSize(f.handle.FileHandle, newFileSize);
+          e != 0.OSErrorCode): raiseOSError(e)
     when defined(linux): #Maybe NetBSD, too?
       # On Linux this can be over 100 times faster than a munmap,mmap cycle.
       proc mremap(old: pointer; oldSize, newSize: csize_t; flags: cint):
