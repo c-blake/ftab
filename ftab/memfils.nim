@@ -335,11 +335,11 @@ proc resize*(f: var MemFile, newFileSize: int) {.raises: [IOError, OSError].} =
     if f.fHandle == INVALID_HANDLE_VALUE:
       raise newException(IOError,
                          "Cannot resize MemFile opened with allowRemap=false")
-    if newFileSize > f.size: # Seek to size & `setEndOfFile` => allocated.
-      if (let e = setFileSize(f.fHandle.FileHandle, newFileSize);
-          e != 0.OSErrorCode): raiseOSError(e)
     if unmapViewOfFile(f.mem) == 0 or closeHandle(f.mapHandle) == 0: # Un-do map
       raiseOSError(osLastError())
+    if newFileSize != f.size: # Seek to size & `setEndOfFile` => allocated.
+      if (let e = setFileSize(f.fHandle.FileHandle, newFileSize);
+          e != 0.OSErrorCode): raiseOSError(e)
     f.mapHandle = createFileMappingW(f.fHandle, nil, PAGE_READWRITE, 0,0,nil)
     if f.mapHandle == 0:                                             # Re-do map
       raiseOSError(osLastError())
@@ -353,7 +353,7 @@ proc resize*(f: var MemFile, newFileSize: int) {.raises: [IOError, OSError].} =
     if f.handle == -1:
       raise newException(IOError,
                          "Cannot resize MemFile opened with allowRemap=false")
-    if newFileSize > f.size:
+    if newFileSize != f.size:
       if (let e = setFileSize(f.handle.FileHandle, newFileSize);
           e != 0.OSErrorCode): raiseOSError(e)
     when defined(linux): #Maybe NetBSD, too?
