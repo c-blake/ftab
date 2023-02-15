@@ -24,13 +24,12 @@ elif defined(posix):
 else:
   {.error: "the memfiles module is not supported on your operating system!".}
 
-import os, streams
+import streams
+import std/oserrors
 
 when defined(nimPreviewSlimSystem):
   import std/[syncio, assertions]
 
-when not declared(csize_t):                     # Works back to Nim-0.20.2
-  type csize_t = csize
 
 proc newEIO(msg: string): ref IOError =
   new(result)
@@ -38,9 +37,9 @@ proc newEIO(msg: string): ref IOError =
 
 proc setFileSize*(fh: FileHandle, newFileSize = -1): OSErrorCode =
   ## Set the size of open file pointed to by `fh` to `newFileSize` if != -1.
-  ## Space is only allocated if this is cheaper than writing to the file.  This
+  ## Space is only allocated if that is cheaper than writing to the file.  This
   ## routine returns the last OSErrorCode found rather than raising to support
-  ## old rollback/clean-up code style.  [ This should really be in std/os. ]
+  ## old rollback/clean-up code style. [ This should maybe go to std/osfiles. ]
   if newFileSize == -1:
     return
   when defined(windows):
@@ -151,16 +150,17 @@ proc open*(filename: string, mode: FileMode = fmRead,
   ## Example:
   ##
   ## .. code-block:: nim
-  ##   var mm, mm_full, mm_half: MemFile   # Make a new file
+  ##   var
+  ##     mm, mm_full, mm_half: MemFile
   ##
-  ##   mm = memfiles.open("/tmp/test.mmap", mode = fmWrite, newFileSize = 1024)
+  ##   mm = memfiles.open("x.mem", mode = fmWrite, newFileSize = 1024) #Make new
   ##   mm.close()
   ##
   ##   # Read the whole file, would fail if newFileSize was set
-  ##   mm_full = memfiles.open("/tmp/t.mmap", mode=fmReadWrite, mappedSize = -1)
+  ##   mm_full = memfiles.open("x.mem", mode = fmReadWrite, mappedSize = -1)
   ##
   ##   # Read the first 512 bytes
-  ##   mm_half = memfiles.open("/tmp/t.mmap", mode=fmReadWrite, mappedSize=512)
+  ##   mm_half = memfiles.open("x.mem", mode = fmReadWrite, mappedSize = 512)
 
   # The file can be resized only when write mode is used:
   if mode == fmAppend:
@@ -409,8 +409,8 @@ proc close*(f: var MemFile) =
   if error: raiseOSError(lastErr)
 
 type MemSlice* = object ## Represent slice of a MemFile
-  data*: pointer        ## This is for iteration over delimited lines/records
-  size*: int
+  data*: pointer        ## This type is for iteration over delimited records.
+  size*: int            ## For example, lines in a file | fields within lines.
 
 proc `==`*(x, y: MemSlice): bool =
   ## Compare a pair of MemSlice for strict equality.
@@ -421,8 +421,7 @@ proc `$`*(ms: MemSlice): string {.inline.} =
   result.setLen(ms.size)
   copyMem(addr(result[0]), ms.data, ms.size)
 
-iterator memSlices*(mfile: MemFile, delim = '\l', eat = '\r'):
-  MemSlice {.inline.} =
+iterator memSlices*(mfile: MemFile, delim = '\l', eat = '\r'): MemSlice =
   ## Iterate over \[optional `eat`] `delim`-delimited slices in MemFile `mfile`.
   ##
   ## Default parameters parse lines ending in either Unix (\\l) or Windows
@@ -462,13 +461,13 @@ iterator memSlices*(mfile: MemFile, delim = '\l', eat = '\r'):
   ms.data = mfile.mem
   var remaining = mfile.size
   while remaining > 0:
-    ending = c_memchr(ms.data, delim, remaining.csize_t)
+    ending = c_memchr(ms.data, delim, csize_t(remaining))
     if ending == nil: # unterminated final slice
       ms.size = remaining # Weird case..check eat?
       yield ms
       break
     ms.size = ending -! ms.data # delim is NOT included
-    if eat != '\0' and ms.size>0 and cast[cstring](ms.data)[ms.size - 1] == eat:
+    if eat != '\0' and ms.size > 0 and cast[cstring](ms.data)[ms.size-1] == eat:
       dec(ms.size) # trim pre-delim char
     yield ms
     ms.data = cast[pointer](cast[int](ending) +% 1) # skip delim
@@ -515,7 +514,7 @@ type
   MemMapFileStreamObj* = object of Stream
     mf: MemFile
     mode: FileMode
-    pos: int
+    pos: int        # Could be `uint`, but same is true of `MemFile.size`.
 
 proc mmsClose(s: Stream) =
   MemMapFileStream(s).pos = -1
