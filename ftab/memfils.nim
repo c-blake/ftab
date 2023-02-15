@@ -35,11 +35,11 @@ proc newEIO(msg: string): ref IOError =
   new(result)
   result.msg = msg
 
-proc setFileSize*(fh: FileHandle, newFileSize = -1): OSErrorCode =
+proc setFileSize(fh: FileHandle, newFileSize = -1): OSErrorCode =
   ## Set the size of open file pointed to by `fh` to `newFileSize` if != -1.
   ## Space is only allocated if that is cheaper than writing to the file.  This
   ## routine returns the last OSErrorCode found rather than raising to support
-  ## old rollback/clean-up code style. [ This should maybe go to std/osfiles. ]
+  ## old rollback/clean-up code style. [ Should maybe move to std/osfiles. ]
   if newFileSize == -1:
     return
   when defined(windows):
@@ -52,11 +52,12 @@ proc setFileSize*(fh: FileHandle, newFileSize = -1): OSErrorCode =
       result = lastErr
   else:
     var e: cint # posix_fallocate truncates up when needed.
-    while (e = posix_fallocate(fh, 0, newFileSize); e == EINTR):
-      discard
+    when declared(posix_fallocate):
+      while (e = posix_fallocate(fh, 0, newFileSize); e == EINTR):
+        discard
     if e in [EINVAL, EOPNOTSUPP] and ftruncate(fh, newFileSize) == -1:
-      result = osLastError()
-    elif e != 0: # ftruncate fallback arguable; More portable,but can now SEGV
+      result = osLastError() # fallback arguable; Most portable, but allows SEGV
+    elif e != 0:
       result = osLastError()
 
 type
