@@ -5,5 +5,5 @@ description = "Native Nim File-Based Hash Table"
 license     = "MIT/ISC"
 
 # Deps
-requires    "nim >= 0.20.2"
+requires    "nim >= 1.6.12"
 installExt  = @[ ".nim" ]

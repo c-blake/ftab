@@ -18,7 +18,7 @@ when not declared(csize_t):                     # Works back to Nim-0.20.2
   type csize_t = csize
 type Ce = CatchableError
 
-import std/[hashes, os, options, math], ftab/memfils as mf, system/ansi_c
+import std/[hashes, os, options, math], std/memfiles as mf, system/ansi_c
 
 template tryImport(module) =    # if `chronicles` is installed, use it unless
   import module                 # `-d:chronicles_enabled=off` is also given.
